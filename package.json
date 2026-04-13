@@ -1,0 +1,30 @@
+{
+  "name": "serlex-backend",
+  "version": "1.0.0",
+  "description": "",
+  "homepage": "https://github.com/sahilkalkal9/serlex-backend#readme",
+  "bugs": {
+    "url": "https://github.com/sahilkalkal9/serlex-backend/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/sahilkalkal9/serlex-backend.git"
+  },
+  "license": "ISC",
+  "author": "Sahil Kalkal",
+  "type": "module",
+  "main": "server.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "dev": "nodemon server.js"
+  },
+  "dependencies": {
+    "bcryptjs": "^3.0.3",
+    "cors": "^2.8.6",
+    "dotenv": "^17.4.2",
+    "express": "^5.2.1",
+    "jsonwebtoken": "^9.0.3",
+    "mongoose": "^9.4.1",
+    "nodemon": "^3.1.14"
+  }
+}
