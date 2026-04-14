@@ -7,10 +7,7 @@ export const logoutUser = async (req, res) => {
 
     const latestActivity = await Activity.findOne({
       user: userId,
-      $or: [
-        { logoutTime: null },
-        { logoutTime: { $exists: false } },
-      ],
+      $or: [{ logoutTime: null }, { logoutTime: { $exists: false } }],
     }).sort({ createdAt: -1 });
 
     if (!latestActivity) {
@@ -62,6 +59,26 @@ export const getMyActivities = async (req, res) => {
     return res.status(500).json({
       success: false,
       message: "Server error while fetching activities",
+    });
+  }
+};
+
+export const getAllActivities = async (req, res) => {
+  try {
+    const activities = await Activity.find()
+      .populate("user", "name email employeeId role")
+      .sort({ createdAt: -1 });
+
+    return res.status(200).json({
+      success: true,
+      count: activities.length,
+      activities,
+    });
+  } catch (error) {
+    console.error("Get all activities error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Server error while fetching all activities",
     });
   }
 };
