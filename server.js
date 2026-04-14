@@ -21,6 +21,8 @@ const allowedOrigins = [
   "https://serlex-frontend.vercel.app"
 ];
 
+
+
 // Middleware
 app.use(
   cors({
