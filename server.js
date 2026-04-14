@@ -17,7 +17,8 @@ const PORT = process.env.PORT || 5000;
 const allowedOrigins = [
   "http://localhost:3000",
   "https://your-frontend-domain.com",
-  "https://crm.techvrm.com", // apna real frontend domain yahan daal
+  "https://crm.techvrm.com", 
+  "https://serlex-frontend.vercel.app"
 ];
 
 // Middleware
