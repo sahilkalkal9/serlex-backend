@@ -9,6 +9,7 @@ const generateToken = (user) => {
       id: user._id,
       employeeId: user.employeeId,
       email: user.email,
+      role: user.role,
     },
     process.env.JWT_SECRET,
     { expiresIn: "7d" }
@@ -17,7 +18,7 @@ const generateToken = (user) => {
 
 export const signup = async (req, res) => {
   try {
-    const { name, email, employeeId, dob, signupLocation } = req.body;
+    const { name, email, employeeId, dob, signupLocation, role } = req.body;
 
     if (!name || !email || !employeeId || !dob) {
       return res.status(400).json({
@@ -46,6 +47,7 @@ export const signup = async (req, res) => {
       employeeId,
       dob,
       password: hashedPassword,
+      role: role || "sales_user",
     });
 
     await Activity.create({
@@ -72,6 +74,7 @@ export const signup = async (req, res) => {
         email: user.email,
         employeeId: user.employeeId,
         dob: user.dob,
+        role: user.role,
       },
     });
   } catch (error) {
@@ -136,6 +139,7 @@ export const login = async (req, res) => {
         email: user.email,
         employeeId: user.employeeId,
         dob: user.dob,
+        role: user.role,
       },
     });
   } catch (error) {

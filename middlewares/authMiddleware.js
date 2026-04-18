@@ -24,3 +24,33 @@ export const protect = async (req, res, next) => {
     });
   }
 };
+
+export const authorizeRoles = (...allowedRoles) => {
+  return (req, res, next) => {
+    // agar kuchh pass hi nahi kiya, to access allow
+    if (!allowedRoles || allowedRoles.length === 0) {
+      return next();
+    }
+
+    // agar array ke andar roles aaye hain, unko flatten kar do
+    const roles = allowedRoles.flat();
+
+    // req.user ya role hi missing ho to deny
+    if (!req.user || !req.user.role) {
+      return res.status(403).json({
+        success: false,
+        message: "Access denied: role not found",
+      });
+    }
+
+    // match check
+    if (!roles.includes(req.user.role)) {
+      return res.status(403).json({
+        success: false,
+        message: "Access denied: insufficient permissions",
+      });
+    }
+
+    next();
+  };
+};
