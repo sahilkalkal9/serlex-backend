@@ -27,6 +27,8 @@ export const signup = async (req, res) => {
       });
     }
 
+    
+
     const existingUser = await User.findOne({
       $or: [{ email }, { employeeId }],
     });
