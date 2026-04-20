@@ -7,6 +7,9 @@ import axios from "axios";
 
 import authRoutes from "./routes/authRoutes.js";
 import activityRoutes from "./routes/activityRoutes.js";
+import googleRoutes from "./routes/googleRoutes.js";
+import meetingRoutes from "./routes/meetingRoutes.js";
+import meetingReportRoutes from "./routes/meetingReportRoutes.js";
 
 dotenv.config();
 
@@ -16,6 +19,7 @@ const PORT = process.env.PORT || 5000;
 // Allowed frontend origins
 const allowedOrigins = [
   "http://localhost:3000",
+  "http://localhost:3001",
   "https://your-frontend-domain.com",
   "https://crm.techvrm.com", 
   "https://serlex-frontend.vercel.app"
@@ -48,6 +52,9 @@ app.get("/", (req, res) => {
 // API routes
 app.use("/api/auth", authRoutes);
 app.use("/api/activity", activityRoutes);
+app.use("/api/google", googleRoutes);
+app.use("/api/meetings", meetingRoutes);
+app.use("/api/meeting-reports", meetingReportRoutes);
 
 // Self-ping cron job to keep server active
 // Runs every 10 minutes
