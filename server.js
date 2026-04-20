@@ -23,7 +23,7 @@ const allowedOrigins = [
   "https://your-frontend-domain.com",
   "https://crm.techvrm.com", 
   "https://serlex-frontend.vercel.app",
-  "https://serlex-main-frontend.vercel.app/"
+  "https://serlex-main-frontend.vercel.app"
 ];
 
 
