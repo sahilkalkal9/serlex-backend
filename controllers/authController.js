@@ -18,25 +18,47 @@ const generateToken = (user) => {
 
 export const signup = async (req, res) => {
   try {
-    const { name, email, employeeId, dob, signupLocation, role } = req.body;
+    const {
+      name,
+      email,
+      employeeId,
+      mobileNumber,
+      department,
+      designation,
+      managerName,
+      territory,
+      joiningDate,
+      username,
+      dob,
+      signupLocation,
+      role,
+    } = req.body;
 
-    if (!name || !email || !employeeId || !dob) {
+    if (
+      !name ||
+      !email ||
+      !employeeId ||
+      !mobileNumber ||
+      !department ||
+      !designation ||
+      !joiningDate ||
+      !username ||
+      !dob
+    ) {
       return res.status(400).json({
         success: false,
-        message: "All fields are required",
+        message: "All required fields are mandatory",
       });
     }
 
-    
-
     const existingUser = await User.findOne({
-      $or: [{ email }, { employeeId }],
+      $or: [{ email }, { employeeId }, { username }],
     });
 
     if (existingUser) {
       return res.status(400).json({
         success: false,
-        message: "User already exists with this email or employee ID",
+        message: "User already exists with this email, employee ID, or username",
       });
     }
 
@@ -47,6 +69,13 @@ export const signup = async (req, res) => {
       name,
       email,
       employeeId,
+      mobileNumber,
+      department,
+      designation,
+      managerName,
+      territory,
+      joiningDate,
+      username,
       dob,
       password: hashedPassword,
       role: role || "sales_user",
@@ -75,6 +104,13 @@ export const signup = async (req, res) => {
         name: user.name,
         email: user.email,
         employeeId: user.employeeId,
+        mobileNumber: user.mobileNumber,
+        department: user.department,
+        designation: user.designation,
+        managerName: user.managerName,
+        territory: user.territory,
+        joiningDate: user.joiningDate,
+        username: user.username,
         dob: user.dob,
         role: user.role,
       },
@@ -140,6 +176,13 @@ export const login = async (req, res) => {
         name: user.name,
         email: user.email,
         employeeId: user.employeeId,
+        mobileNumber: user.mobileNumber,
+        department: user.department,
+        designation: user.designation,
+        managerName: user.managerName,
+        territory: user.territory,
+        joiningDate: user.joiningDate,
+        username: user.username,
         dob: user.dob,
         role: user.role,
       },
