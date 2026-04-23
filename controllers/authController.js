@@ -10,6 +10,7 @@ const generateToken = (user) => {
       employeeId: user.employeeId,
       email: user.email,
       role: user.role,
+      subRole: user.subRole || "",
     },
     process.env.JWT_SECRET,
     { expiresIn: "7d" }
@@ -32,6 +33,7 @@ export const signup = async (req, res) => {
       dob,
       signupLocation,
       role,
+      subRole,
     } = req.body;
 
     if (
@@ -48,6 +50,13 @@ export const signup = async (req, res) => {
       return res.status(400).json({
         success: false,
         message: "All required fields are mandatory",
+      });
+    }
+
+    if (role === "subadmin" && !subRole) {
+      return res.status(400).json({
+        success: false,
+        message: "Sub role is required for subadmin",
       });
     }
 
@@ -79,6 +88,7 @@ export const signup = async (req, res) => {
       dob,
       password: hashedPassword,
       role: role || "sales_user",
+      subRole: role === "subadmin" ? subRole : "",
     });
 
     await Activity.create({
@@ -113,13 +123,14 @@ export const signup = async (req, res) => {
         username: user.username,
         dob: user.dob,
         role: user.role,
+        subRole: user.subRole || "",
       },
     });
   } catch (error) {
     console.error("Signup error:", error);
     return res.status(500).json({
       success: false,
-      message: "Server error during signup",
+      message: error.message || "Server error during signup",
     });
   }
 };
@@ -185,6 +196,7 @@ export const login = async (req, res) => {
         username: user.username,
         dob: user.dob,
         role: user.role,
+        subRole: user.subRole || "",
       },
     });
   } catch (error) {

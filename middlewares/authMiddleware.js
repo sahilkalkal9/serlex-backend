@@ -12,7 +12,6 @@ export const protect = async (req, res, next) => {
     }
 
     const token = authHeader.split(" ")[1];
-
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
 
     req.user = decoded;
@@ -27,15 +26,12 @@ export const protect = async (req, res, next) => {
 
 export const authorizeRoles = (...allowedRoles) => {
   return (req, res, next) => {
-    // agar kuchh pass hi nahi kiya, to access allow
     if (!allowedRoles || allowedRoles.length === 0) {
       return next();
     }
 
-    // agar array ke andar roles aaye hain, unko flatten kar do
     const roles = allowedRoles.flat();
 
-    // req.user ya role hi missing ho to deny
     if (!req.user || !req.user.role) {
       return res.status(403).json({
         success: false,
@@ -43,11 +39,36 @@ export const authorizeRoles = (...allowedRoles) => {
       });
     }
 
-    // match check
     if (!roles.includes(req.user.role)) {
       return res.status(403).json({
         success: false,
         message: "Access denied: insufficient permissions",
+      });
+    }
+
+    next();
+  };
+};
+
+export const authorizeSubRoles = (...allowedSubRoles) => {
+  return (req, res, next) => {
+    if (!allowedSubRoles || allowedSubRoles.length === 0) {
+      return next();
+    }
+
+    const subRoles = allowedSubRoles.flat();
+
+    if (!req.user || !req.user.subRole) {
+      return res.status(403).json({
+        success: false,
+        message: "Access denied: sub role not found",
+      });
+    }
+
+    if (!subRoles.includes(req.user.subRole)) {
+      return res.status(403).json({
+        success: false,
+        message: "Access denied: insufficient sub role permissions",
       });
     }
 

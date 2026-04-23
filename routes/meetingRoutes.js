@@ -1,5 +1,8 @@
 import express from "express";
-import { protect } from "../middlewares/authMiddleware.js";
+import {
+  protect,
+  authorizeRoles,
+} from "../middlewares/authMiddleware.js";
 import {
   getMeetings,
   createMeeting,
@@ -9,7 +12,19 @@ import {
 const router = express.Router();
 
 router.get("/", protect, getMeetings);
-router.post("/", protect, createMeeting);
-router.patch("/:id/status", protect, updateMeetingStatus);
+
+router.post(
+  "/",
+  protect,
+  authorizeRoles(["sales_user", "subadmin", "admin", "superadmin"]),
+  createMeeting
+);
+
+router.patch(
+  "/:id/status",
+  protect,
+  authorizeRoles(["sales_user", "subadmin", "admin", "superadmin"]),
+  updateMeetingStatus
+);
 
 export default router;

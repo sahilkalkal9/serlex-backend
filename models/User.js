@@ -81,9 +81,36 @@ const userSchema = new mongoose.Schema(
       enum: ["superadmin", "admin", "subadmin", "sales_user"],
       default: "sales_user",
     },
+
+    subRole: {
+      type: String,
+      enum: [
+        "",
+        "sales_manager",
+        "po_manager",
+        "ppc_manager",
+        "hr_manager",
+        "accounts_manager",
+        "operations_manager",
+      ],
+      default: "",
+      trim: true,
+    },
   },
   { timestamps: true }
 );
+
+userSchema.pre("validate", function (next) {
+  if (this.role !== "subadmin") {
+    this.subRole = "";
+  }
+
+  if (this.role === "subadmin" && !this.subRole) {
+    return next(new Error("subRole is required when role is subadmin"));
+  }
+
+  next();
+});
 
 const User = mongoose.model("User", userSchema);
 
