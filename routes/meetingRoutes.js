@@ -7,9 +7,18 @@ import {
   getMeetings,
   createMeeting,
   updateMeetingStatus,
+  getSalesUsersMeetings,
+  createMeetingForSalesUser,
 } from "../controllers/meetingController.js";
 
 const router = express.Router();
+
+router.get(
+  "/sales-users",
+  protect,
+  authorizeRoles(["admin", "subadmin", "superadmin"]),
+  getSalesUsersMeetings
+);
 
 router.get("/", protect, getMeetings);
 
@@ -25,6 +34,13 @@ router.patch(
   protect,
   authorizeRoles(["sales_user", "subadmin", "admin", "superadmin"]),
   updateMeetingStatus
+);
+
+router.post(
+  "/sales-users",
+  protect,
+  authorizeRoles(["admin", "subadmin", "superadmin"]),
+  createMeetingForSalesUser
 );
 
 export default router;

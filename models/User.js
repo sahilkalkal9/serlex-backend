@@ -96,21 +96,14 @@ const userSchema = new mongoose.Schema(
       default: "",
       trim: true,
     },
+    status: {
+      type: String,
+      enum: ["pending", "approved", "inactive"],
+      default: "pending",
+    },
   },
   { timestamps: true }
 );
-
-userSchema.pre("validate", function (next) {
-  if (this.role !== "subadmin") {
-    this.subRole = "";
-  }
-
-  if (this.role === "subadmin" && !this.subRole) {
-    return next(new Error("subRole is required when role is subadmin"));
-  }
-
-  next();
-});
 
 const User = mongoose.model("User", userSchema);
 
