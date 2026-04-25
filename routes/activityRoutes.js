@@ -17,22 +17,21 @@ router.get("/my-activities", protect, getMyActivities);
 
 router.get(
   "/all",
-  protect,
-  (req, res, next) => {
-    const allowedTopRoles = ["admin", "superadmin"];
-    if (allowedTopRoles.includes(req.user.role)) {
-      return next();
-    }
+  // (req, res, next) => {
+  //   const allowedTopRoles = ["admin", "superadmin",""];
+  //   if (allowedTopRoles.includes(req.user.role)) {
+  //     return next();
+  //   }     
 
-    if (req.user.role === "subadmin" && req.user.subRole === "sales_manager") {
-      return next();
-    }
+  //   if (req.user.role === "subadmin" && req.user.subRole === "sales_manager") {
+  //     return next();
+  //   }
 
-    return res.status(403).json({
-      success: false,
-      message: "Access denied: insufficient permissions",
-    });
-  },
+  //   return res.status(403).json({
+  //     success: false,
+  //     message: "Access denied: insufficient permissions",
+  //   });
+  // },
   getAllActivities
 );
 
