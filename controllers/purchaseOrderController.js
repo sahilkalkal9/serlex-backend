@@ -153,3 +153,167 @@ export const getPurchaseDashboard = async (req, res) => {
     });
   }
 };
+
+
+export const getNewPurchaseOrders = async (req, res) => {
+  try {
+    const { fromDate, toDate } = req.query;
+
+    const filter = {};
+
+    if (fromDate && toDate) {
+      const from = new Date(fromDate);
+      from.setHours(0, 0, 0, 0);
+
+      const to = new Date(toDate);
+      to.setHours(23, 59, 59, 999);
+
+      filter.poDate = { $gte: from, $lte: to };
+    }
+
+    const orders = await PurchaseOrder.find(filter).sort({ poDate: -1 });
+
+    const totalValue = orders.reduce(
+      (sum, order) => sum + Number(order.poValue || 0),
+      0
+    );
+
+    const uniqueCompanies = new Set(
+      orders.map((order) => order.companyName)
+    ).size;
+
+    res.status(200).json({
+      success: true,
+      cards: {
+        totalNewPO: orders.length,
+        pendingReview: orders.filter((order) => order.status === "Pending").length,
+        uniqueCompanies,
+        totalPOValue: formatMoney(totalValue),
+      },
+      rows: orders.map((order) => ({
+        poNo: order.poNo,
+        poDate: order.poDate,
+        company: order.companyName,
+        category: order.category,
+        edd: order.expectedDeliveryDate,
+        deliveryDate: order.deliveryDate,
+        status: order.status,
+      })),
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: "Failed to fetch new purchase orders",
+      error: error.message,
+    });
+  }
+};
+
+export const getProcessingPurchaseOrders = async (req, res) => {
+  try {
+    const { fromDate, toDate } = req.query;
+
+     const filter = {
+      status: "In Progress",
+    };
+
+    if (fromDate && toDate) {
+      const from = new Date(fromDate);
+      from.setHours(0, 0, 0, 0);
+
+      const to = new Date(toDate);
+      to.setHours(23, 59, 59, 999);
+
+      filter.poDate = { $gte: from, $lte: to };
+    }
+
+    const orders = await PurchaseOrder.find(filter).sort({ poDate: -1 });
+
+    res.status(200).json({
+      success: true,
+      cards: {
+        totalToProcess: orders.length,
+        inReview: orders.filter((o) => o.status === "Pending").length,
+        sentForApproval: orders.filter((o) => o.status === "Approved").length,
+        processed: orders.filter((o) => o.status === "Completed").length,
+      },
+      rows: orders.map((order) => ({
+        poNo: order.poNo,
+        poDate: order.poDate,
+        company: order.companyName,
+        category: order.category,
+        edd: order.expectedDeliveryDate,
+        deliveryDate: order.deliveryDate,
+        status: order.status,
+        assignedTo: order.assignedTo || "Unassigned",
+      })),
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: "Failed to fetch processing purchase orders",
+      error: error.message,
+    });
+  }
+};
+
+export const getApprovedPurchaseOrders = async (req, res) => {
+  try {
+    const { fromDate, toDate } = req.query;
+
+    const filter = {
+      status: "Approved", // 🔥 ONLY APPROVED
+    };
+
+    if (fromDate && toDate) {
+      const from = new Date(fromDate);
+      from.setHours(0, 0, 0, 0);
+
+      const to = new Date(toDate);
+      to.setHours(23, 59, 59, 999);
+
+      filter.poDate = { $gte: from, $lte: to };
+    }
+
+    const orders = await PurchaseOrder.find(filter).sort({ poDate: -1 });
+
+    const totalValue = orders.reduce(
+      (sum, o) => sum + Number(o.poValue || 0),
+      0
+    );
+
+    const uniqueCompanies = new Set(
+      orders.map((o) => o.companyName)
+    ).size;
+
+    res.status(200).json({
+      success: true,
+      cards: {
+        totalApprovedOrders: orders.length,
+        approvedCompanies: uniqueCompanies,
+        totalPOValue: `₹ ${totalValue}`,
+        readyForProcessing: orders.filter(
+          (o) => o.status === "Approved"
+        ).length,
+      },
+      rows: orders.map((o) => ({
+        poNo: o.poNo,
+        poDate: o.poDate,
+        company: o.companyName,
+        category: o.category,
+        edd: o.expectedDeliveryDate,
+        deliveryDate: o.deliveryDate,
+        poValue: o.poValue,
+        approvedDate: o.updatedAt,
+        approvedBy: o.approvedBy || "Admin",
+        status: "Ready",
+      })),
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: "Failed to fetch approved orders",
+      error: error.message,
+    });
+  }
+};

@@ -12,6 +12,8 @@ import meetingRoutes from "./routes/meetingRoutes.js";
 import meetingReportRoutes from "./routes/meetingReportRoutes.js";
 import salesUserRoutes from "./routes/salesUserRoutes.js";
 import purchaseOrderRoutes from "./routes/purchaseOrderRoutes.js";
+import vendorRoutes from "./routes/vendorRoutes.js";
+
 
 
 dotenv.config();
@@ -61,6 +63,8 @@ app.use("/api/meetings", meetingRoutes);
 app.use("/api/meeting-reports", meetingReportRoutes);
 app.use("/api/sales-users", salesUserRoutes);
 app.use("/api/purchase-orders", purchaseOrderRoutes);
+app.use("/api/vendors", vendorRoutes);
+
 
 
 // Self-ping cron job to keep server active
