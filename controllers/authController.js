@@ -34,7 +34,7 @@ export const signup = async (req, res) => {
       signupLocation,
       role,
       subRole,
-      pin
+      pin,
     } = req.body;
 
     if (
@@ -47,7 +47,7 @@ export const signup = async (req, res) => {
       !joiningDate ||
       !username ||
       !dob
-    ) { 
+    ) {
       return res.status(400).json({
         success: false,
         message: "All required fields are mandatory",
@@ -68,7 +68,8 @@ export const signup = async (req, res) => {
     if (existingUser) {
       return res.status(400).json({
         success: false,
-        message: "User already exists with this email, employee ID, or username",
+        message:
+          "User already exists with this email, employee ID, or username",
       });
     }
 
@@ -91,7 +92,7 @@ export const signup = async (req, res) => {
       password: hashedPassword,
       role: role || "sales_user",
       subRole: role === "subadmin" ? subRole : "",
-      pin: hashedPin
+      pin: hashedPin,
     });
 
     await Activity.create({
@@ -159,7 +160,7 @@ export const login = async (req, res) => {
       });
     }
 
-    const isPasswordMatch = await bcrypt.compare(password, user.pin);
+    const isPasswordMatch = await bcrypt.compare(password, user.password);
 
     if (!isPasswordMatch) {
       return res.status(401).json({
