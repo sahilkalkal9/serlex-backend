@@ -46,7 +46,7 @@ export const signup = async (req, res) => {
       !joiningDate ||
       !username ||
       !dob
-    ) {
+    ) { 
       return res.status(400).json({
         success: false,
         message: "All required fields are mandatory",

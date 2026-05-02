@@ -69,16 +69,21 @@ app.use("/api/vendors", vendorRoutes);
 
 // Self-ping cron job to keep server active
 // Runs every 10 minutes
-cron.schedule("*/10 * * * *", async () => {
+// Self-ping cron job (Every 1 minute)
+cron.schedule("* * * * *", async () => {
   try {
-    const baseUrl = process.env.BASE_URL || `http://localhost:${PORT}`;
-    await axios.get(baseUrl);
-    console.log(`Self ping successful at ${new Date().toISOString()}`);
+    const baseUrl =
+      process.env.BASE_URL || `http://localhost:${PORT}`;
+
+    const response = await axios.get(`${baseUrl}/api/ping`);
+
+    console.log(
+      `Cron Ping: ${response.data.message} | Time: ${response.data.time}`
+    );
   } catch (error) {
     console.error("Self ping failed:", error.message);
   }
 });
-
 // MongoDB connection and server start
 mongoose
   .connect(process.env.MONGO_URI)
