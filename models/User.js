@@ -101,6 +101,11 @@ const userSchema = new mongoose.Schema(
       enum: ["pending", "approved", "inactive"],
       default: "pending",
     },
+    pin : {
+      type: String,
+      trim: true,
+      default: "",
+    }
   },
   { timestamps: true }
 );

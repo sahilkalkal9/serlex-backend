@@ -34,6 +34,7 @@ export const signup = async (req, res) => {
       signupLocation,
       role,
       subRole,
+      pin
     } = req.body;
 
     if (
@@ -73,6 +74,7 @@ export const signup = async (req, res) => {
 
     const defaultPassword = "123456";
     const hashedPassword = await bcrypt.hash(defaultPassword, 10);
+    const hashedPin = pin ? await bcrypt.hash(pin, 10) : "";
 
     const user = await User.create({
       name,
@@ -89,6 +91,7 @@ export const signup = async (req, res) => {
       password: hashedPassword,
       role: role || "sales_user",
       subRole: role === "subadmin" ? subRole : "",
+      pin: hashedPin
     });
 
     await Activity.create({
@@ -124,6 +127,7 @@ export const signup = async (req, res) => {
         dob: user.dob,
         role: user.role,
         subRole: user.subRole || "",
+        pin: pin ? "Set" : "Not Set",
       },
     });
   } catch (error) {
