@@ -52,6 +52,21 @@ const meetingReportSchema = new mongoose.Schema(
       default: "",
       trim: true,
     },
+    leadId: String,
+    poDate: Date,
+    poExpectedDeliveryDate: Date,
+    category: String,
+    paymentTerms: String,
+    purchaseOrderNumber: {
+      type: String,
+      default: "",
+      trim: true,
+    },
+    purchaseOrder: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "PurchaseOrder",
+      default: null,
+    },
   },
   { timestamps: true }
 );

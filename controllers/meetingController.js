@@ -29,10 +29,9 @@ export const getMeetings = async (req, res) => {
 
 export const getSalesUsersMeetings = async (req, res) => {
   try {
-    const { status, search = "" } = req.query;
+    const { status, approvalStatus, search = "" } = req.query;
 
     const salesUsers = await User.find({ role: "sales_user" }).select("_id");
-
     const salesUserIds = salesUsers.map((user) => user._id);
 
     const query = {
@@ -41,6 +40,13 @@ export const getSalesUsersMeetings = async (req, res) => {
 
     if (status && ["upcoming", "completed", "cancelled"].includes(status)) {
       query.status = status;
+    }
+
+    if (
+      approvalStatus &&
+      ["pending", "approved", "rejected"].includes(approvalStatus)
+    ) {
+      query.approvalStatus = approvalStatus;
     }
 
     if (search) {
@@ -134,6 +140,7 @@ export const createMeeting = async (req, res) => {
       googleCalendarId: "primary",
       source: "google",
       status,
+      approvalStatus: "pending",
     });
 
     return res.status(201).json({
@@ -201,6 +208,63 @@ export const updateMeetingStatus = async (req, res) => {
   }
 };
 
+export const updateMeetingApprovalStatus = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { approvalStatus } = req.body;
+
+    if (!["pending", "approved", "rejected"].includes(approvalStatus)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid approval status",
+      });
+    }
+
+    const meeting = await Meeting.findById(id).populate(
+      "createdBy",
+      "role subRole"
+    );
+
+    if (!meeting) {
+      return res.status(404).json({
+        success: false,
+        message: "Meeting not found",
+      });
+    }
+
+    const isAdmin = ["admin", "superadmin"].includes(req.user.role);
+    const isSalesManager =
+      req.user.role === "subadmin" && req.user.subRole === "sales_manager";
+
+    if (!isAdmin && !isSalesManager) {
+      return res.status(403).json({
+        success: false,
+        message: "Only manager/admin can approve meeting",
+      });
+    }
+
+    if (meeting.approvalStatus !== "pending" && approvalStatus === "approved") {
+      return res.status(400).json({
+        success: false,
+        message: "Only pending meetings can be approved",
+      });
+    }
+
+    meeting.approvalStatus = approvalStatus;
+    await meeting.save();
+
+    return res.status(200).json({
+      success: true,
+      message: `Meeting ${approvalStatus} successfully`,
+      meeting,
+    });
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      message: error.message || "Failed to update meeting approval status",
+    });
+  }
+};
 
 export const createMeetingForSalesUser = async (req, res) => {
   try {
@@ -283,6 +347,7 @@ export const createMeetingForSalesUser = async (req, res) => {
       googleCalendarId: "primary",
       source: "google",
       status,
+      approvalStatus: "pending",
     });
 
     return res.status(201).json({

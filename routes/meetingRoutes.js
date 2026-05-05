@@ -7,6 +7,7 @@ import {
   getMeetings,
   createMeeting,
   updateMeetingStatus,
+  updateMeetingApprovalStatus,
   getSalesUsersMeetings,
   createMeetingForSalesUser,
 } from "../controllers/meetingController.js";
@@ -34,6 +35,13 @@ router.patch(
   protect,
   authorizeRoles(["sales_user", "subadmin", "admin", "superadmin"]),
   updateMeetingStatus
+);
+
+router.patch(
+  "/:id/approval",
+  protect,
+  authorizeRoles(["admin", "subadmin", "superadmin"]),
+  updateMeetingApprovalStatus
 );
 
 router.post(

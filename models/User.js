@@ -78,7 +78,13 @@ const userSchema = new mongoose.Schema(
 
     role: {
       type: String,
-      enum: ["superadmin", "admin", "subadmin", "sales_user"],
+      enum: [
+        "superadmin",
+        "admin",
+        "subadmin",
+        "sales_user",
+        "purchase_user",
+      ],
       default: "sales_user",
     },
 
@@ -96,16 +102,18 @@ const userSchema = new mongoose.Schema(
       default: "",
       trim: true,
     },
+
     status: {
       type: String,
       enum: ["pending", "approved", "inactive"],
       default: "pending",
     },
-    pin : {
+
+    pin: {
       type: String,
       trim: true,
       default: "",
-    }
+    },
   },
   { timestamps: true }
 );

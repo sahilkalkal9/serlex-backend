@@ -83,8 +83,13 @@ const meetingSchema = new mongoose.Schema(
       default: "upcoming",
     },
     hasReport: {
-  type: Boolean,
-  default: false,
+      type: Boolean,
+      default: false,
+    },
+    approvalStatus: {
+  type: String,
+  enum: ["pending", "approved", "rejected"],
+  default: "pending",
 },
   },
   { timestamps: true }
