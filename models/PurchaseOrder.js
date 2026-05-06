@@ -35,10 +35,61 @@ const purchaseOrderSchema = new mongoose.Schema(
       type: Date,
       default: null,
     },
+
     status: {
       type: String,
       enum: ["Pending", "Approved", "In Progress", "Completed"],
       default: "Pending",
+    },
+
+    activityStatus: {
+      type: String,
+      enum: ["Not Ordered", "Ordered", "Material Received", "Invoiced"],
+      default: "Not Ordered",
+    },
+
+    createdBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+      default: null,
+      index: true,
+    },
+
+    remarks: {
+      type: String,
+      default: "",
+      trim: true,
+    },
+    trackingStatus: {
+      type: String,
+      enum: [
+        "Not Approved",
+        "Approved",
+        "Processed",
+        "In Transit",
+        "Delivered",
+        "Invoiced",
+        "Payment Received",
+        "Delayed",
+      ],
+      default: "Not Approved",
+    },
+
+    vendorName: {
+      type: String,
+      default: "",
+      trim: true,
+    },
+
+    paymentReceivedDate: {
+      type: Date,
+      default: null,
+    },
+
+    trackingRemarks: {
+      type: String,
+      default: "",
+      trim: true,
     },
   },
   { timestamps: true }
