@@ -84,6 +84,7 @@ const userSchema = new mongoose.Schema(
         "subadmin",
         "sales_user",
         "purchase_user",
+        "ppc_user"
       ],
       default: "sales_user",
     },
