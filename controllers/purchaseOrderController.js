@@ -676,6 +676,8 @@ export const getMyDailyActivityOrders = async (req, res) => {
     const { fromDate, toDate, status, delay, search } = req.query;
 
     const filter = {
+      category: "Trading",
+      isApproved: true,
       ...getDateRangeFilter(fromDate, toDate, "poDate"),
     };
 
@@ -687,11 +689,13 @@ export const getMyDailyActivityOrders = async (req, res) => {
       filter.$or = [
         { poNo: { $regex: search, $options: "i" } },
         { companyName: { $regex: search, $options: "i" } },
+        { vendorName: { $regex: search, $options: "i" } },
       ];
     }
 
     const orders = await PurchaseOrder.find(filter)
       .populate("createdBy", "name email designation role subRole")
+      .populate("approvedBy", "name email designation role subRole")
       .sort({ poDate: -1 });
 
     const rows = orders
@@ -702,6 +706,7 @@ export const getMyDailyActivityOrders = async (req, res) => {
           _id: order._id,
           poNo: order.poNo,
           companyName: order.companyName,
+          vendorName: order.vendorName || "",
           category: order.category,
           poValue: order.poValue,
           poDate: order.poDate,
@@ -709,6 +714,9 @@ export const getMyDailyActivityOrders = async (req, res) => {
           deliveryDate: order.deliveryDate,
           status: order.status,
           isApproved: order.isApproved,
+          approvedBy: order.approvedBy,
+          approvedDate: order.approvedDate,
+          approvalRemarks: order.approvalRemarks || "",
           activityStatus: order.activityStatus || "Not Ordered",
           remarks: order.remarks || "",
           createdBy: order.createdBy,
@@ -725,7 +733,9 @@ export const getMyDailyActivityOrders = async (req, res) => {
     const totalPOReceived = rows.length;
 
     const completed = rows.filter(
-      (order) => order.activityStatus === "Material Received"
+      (order) =>
+        order.activityStatus === "Material Received" ||
+        order.activityStatus === "Invoiced"
     ).length;
 
     const inProgress = rows.filter(
@@ -867,7 +877,9 @@ export const getPOTrackingOrders = async (req, res) => {
   try {
     const { fromDate, toDate, status, vendor, search } = req.query;
 
-    const filter = {};
+    const filter = {
+      category: "Trading",
+    };
 
     if (fromDate || toDate) {
       filter.poDate = {};
@@ -913,6 +925,7 @@ export const getPOTrackingOrders = async (req, res) => {
       return {
         _id: order._id,
         poNo: order.poNo,
+        category: order.category,
         vendorCompany: order.vendorName || order.companyName,
         companyName: order.companyName,
         vendorName: order.vendorName || "",
