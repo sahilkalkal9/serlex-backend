@@ -26,14 +26,28 @@ router.get("/", protect, getMeetings);
 router.post(
   "/",
   protect,
-  authorizeRoles(["sales_user", "subadmin", "admin", "superadmin"]),
+  authorizeRoles([
+    "sales_user",
+    "purchase_user",
+    "ppc_user",
+    "subadmin",
+    "admin",
+    "superadmin",
+  ]),
   createMeeting
 );
 
 router.patch(
   "/:id/status",
   protect,
-  authorizeRoles(["sales_user", "subadmin", "admin", "superadmin"]),
+  authorizeRoles([
+    "sales_user",
+    "purchase_user",
+    "ppc_user",
+    "subadmin",
+    "admin",
+    "superadmin",
+  ]),
   updateMeetingStatus
 );
 

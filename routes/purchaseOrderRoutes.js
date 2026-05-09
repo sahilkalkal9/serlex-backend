@@ -11,6 +11,7 @@ import {
   updatePOTrackingOrder,
   getPurchasePlanningTrackingOrders,
   updatePurchasePlanningApproval,
+  updatePOActionStatus,
 } from "../controllers/purchaseOrderController.js";
 import { protect } from "../middlewares/authMiddleware.js";
 
@@ -31,5 +32,6 @@ router.patch("/tracking/:id", protect, updatePOTrackingOrder);
 
 router.get("/planning-tracking", protect, getPurchasePlanningTrackingOrders);
 router.patch("/planning-tracking/:id", protect, updatePurchasePlanningApproval);
+router.patch("/approved/:id/action", protect, updatePOActionStatus);
 
 export default router;

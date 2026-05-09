@@ -569,7 +569,7 @@ export const getApprovedPurchaseOrders = async (req, res) => {
       req.query;
 
     const filter = {
-      ...getApprovedFilter(),
+      category: { $in: ["Manufacturing", "Service"] },
       ...getDateRangeFilter(fromDate, toDate, "poDate"),
     };
 
@@ -586,6 +586,7 @@ export const getApprovedPurchaseOrders = async (req, res) => {
         { poNo: { $regex: search, $options: "i" } },
         { companyName: { $regex: search, $options: "i" } },
         { vendorName: { $regex: search, $options: "i" } },
+        { category: { $regex: search, $options: "i" } },
       ];
     }
 
@@ -599,6 +600,10 @@ export const getApprovedPurchaseOrders = async (req, res) => {
       (sum, order) => sum + Number(order.poValue || 0),
       0
     );
+
+    const approvedPOs = orders.filter((order) => order.isApproved).length;
+
+    const notApprovedPOs = orders.filter((order) => !order.isApproved).length;
 
     const processedPOs = orders.filter(
       (order) => order.processingStatus === "Processed"
@@ -615,7 +620,10 @@ export const getApprovedPurchaseOrders = async (req, res) => {
     return res.status(200).json({
       success: true,
       cards: {
-        totalApprovedPOs: orders.length,
+        totalApprovedPOs: orders.length, // frontend already using this key
+        totalPOs: orders.length,
+        approvedPOs,
+        notApprovedPOs,
         processedPOs,
         pendingProcess,
         notProcessedOrDelayed,
@@ -657,7 +665,7 @@ export const getApprovedPurchaseOrders = async (req, res) => {
   } catch (error) {
     return res.status(500).json({
       success: false,
-      message: "Failed to fetch approved purchase orders",
+      message: "Failed to fetch manufacturing/service purchase orders",
       error: error.message,
     });
   }
@@ -1194,6 +1202,163 @@ export const updatePurchasePlanningApproval = async (req, res) => {
     return res.status(500).json({
       success: false,
       message: "Failed to update purchase planning approval",
+      error: error.message,
+    });
+  }
+};
+
+
+export const updatePOActionStatus = async (req, res) => {
+  try {
+    const { action, remarks } = req.body;
+
+    const allowedActions = [
+      "approve",
+      "reject",
+      "invoiced",
+      "delivered",
+      "completed",
+      "payment_received",
+    ];
+
+    if (!action || !allowedActions.includes(action)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid action",
+      });
+    }
+
+    if (!remarks || !remarks.trim()) {
+      return res.status(400).json({
+        success: false,
+        message: "Remarks are required",
+      });
+    }
+
+    const order = await PurchaseOrder.findById(req.params.id);
+
+    if (!order) {
+      return res.status(404).json({
+        success: false,
+        message: "Purchase order not found",
+      });
+    }
+
+    const updateData = {};
+
+    if (action === "approve") {
+      updateData.isApproved = true;
+      updateData.status = "Approved";
+      updateData.trackingStatus = "Approved";
+      updateData.approvedBy = getUserId(req);
+      updateData.approvedDate = new Date();
+      updateData.approvalRemarks = remarks.trim();
+    }
+
+    if (action === "reject") {
+      updateData.isApproved = false;
+      updateData.status = "Pending";
+      updateData.trackingStatus = "Not Approved";
+      updateData.processingStatus = "Pending";
+      updateData.approvedBy = null;
+      updateData.approvedDate = null;
+      updateData.processedBy = null;
+      updateData.processedDate = null;
+      updateData.approvalRemarks = remarks.trim();
+      updateData.processingRemarks = "";
+      updateData.activityStatus = "Not Ordered";
+    }
+
+    if (action === "invoiced") {
+      if (!order.isApproved) {
+        return res.status(400).json({
+          success: false,
+          message: "Only approved purchase orders can be invoiced",
+        });
+      }
+
+      updateData.activityStatus = "Invoiced";
+      updateData.trackingStatus = "Invoiced";
+      updateData.processingStatus = "Processed";
+      updateData.status = "In Progress";
+      updateData.processedBy = getUserId(req);
+      updateData.processedDate = new Date();
+      updateData.processingRemarks = remarks.trim();
+      updateData.trackingRemarks = remarks.trim();
+    }
+
+    if (action === "delivered") {
+      if (!order.isApproved) {
+        return res.status(400).json({
+          success: false,
+          message: "Only approved purchase orders can be delivered",
+        });
+      }
+
+      updateData.deliveryDate = new Date();
+      updateData.activityStatus = "Material Received";
+      updateData.trackingStatus = "Delivered";
+      updateData.processingStatus = "Processed";
+      updateData.status = "In Progress";
+      updateData.processedBy = getUserId(req);
+      updateData.processedDate = new Date();
+      updateData.processingRemarks = remarks.trim();
+      updateData.trackingRemarks = remarks.trim();
+    }
+
+    if (action === "completed") {
+      if (!order.isApproved) {
+        return res.status(400).json({
+          success: false,
+          message: "Only approved purchase orders can be completed",
+        });
+      }
+
+      updateData.status = "Completed";
+      updateData.trackingStatus = "Delivered";
+      updateData.processingStatus = "Processed";
+      updateData.processedBy = getUserId(req);
+      updateData.processedDate = new Date();
+      updateData.processingRemarks = remarks.trim();
+      updateData.trackingRemarks = remarks.trim();
+    }
+
+    if (action === "payment_received") {
+      if (!order.isApproved) {
+        return res.status(400).json({
+          success: false,
+          message: "Only approved purchase orders can receive payment",
+        });
+      }
+
+      updateData.status = "Completed";
+      updateData.trackingStatus = "Payment Received";
+      updateData.processingStatus = "Processed";
+      updateData.paymentReceivedDate = new Date();
+      updateData.processedBy = getUserId(req);
+      updateData.processedDate = new Date();
+      updateData.processingRemarks = remarks.trim();
+      updateData.trackingRemarks = remarks.trim();
+    }
+
+    const updatedOrder = await PurchaseOrder.findByIdAndUpdate(
+      req.params.id,
+      updateData,
+      { new: true }
+    )
+      .populate("approvedBy", "name email designation")
+      .populate("processedBy", "name email designation")
+      .populate("createdBy", "name email designation");
+
+    return res.status(200).json({
+      success: true,
+      message: "PO action updated successfully",
+      order: updatedOrder,
+    });
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      message: "Failed to update PO action",
       error: error.message,
     });
   }
