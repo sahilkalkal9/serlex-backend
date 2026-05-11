@@ -212,3 +212,30 @@ export const login = async (req, res) => {
     });
   }
 };
+
+
+export const getSalesTeamUsers = async (req, res) => {
+  try {
+    const users = await User.find({
+      status: { $ne: "inactive" },
+      $or: [
+        { role: "sales_user" },
+        { role: "subadmin", subRole: "sales_manager" },
+      ],
+    })
+      .select("name email employeeId mobileNumber department designation role subRole")
+      .sort({ name: 1 });
+
+    return res.status(200).json({
+      success: true,
+      count: users.length,
+      users,
+    });
+  } catch (error) {
+    console.error("getSalesTeamUsers error:", error);
+    return res.status(500).json({
+      success: false,
+      message: error.message || "Failed to fetch sales team users",
+    });
+  }
+};

@@ -16,18 +16,31 @@ const meetingReportSchema = new mongoose.Schema(
 
     companyName: {
       type: String,
-      required: true,
+      required: function () {
+        return this.reportType === "client";
+      },
       trim: true,
     },
     contactPerson: {
       type: String,
-      required: true,
+      required: function () {
+        return this.reportType === "client";
+      },
       trim: true,
     },
     phoneNumber: {
       type: String,
-      required: true,
+      required: function () {
+        return this.reportType === "client";
+      },
       trim: true,
+    },
+    leadStatus: {
+      type: String,
+      enum: ["hot", "warm", "cold"],
+      required: function () {
+        return this.reportType === "client";
+      },
     },
     meetingDateTime: {
       type: Date,
@@ -38,11 +51,7 @@ const meetingReportSchema = new mongoose.Schema(
       default: "",
       trim: true,
     },
-    leadStatus: {
-      type: String,
-      enum: ["hot", "warm", "cold"],
-      required: true,
-    },
+
     expectedDealValue: {
       type: Number,
       default: 0,
@@ -66,6 +75,16 @@ const meetingReportSchema = new mongoose.Schema(
       type: mongoose.Schema.Types.ObjectId,
       ref: "PurchaseOrder",
       default: null,
+    },
+    reportType: {
+      type: String,
+      enum: ["client", "team"],
+      default: "client",
+    },
+    meetingPoints: {
+      type: String,
+      default: "",
+      trim: true,
     },
   },
   { timestamps: true }

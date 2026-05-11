@@ -96,6 +96,7 @@ export const createMeeting = async (req, res) => {
       attendees = [],
       avatarUrl = "",
       status = "upcoming",
+      meetingType = "client",
     } = req.body;
 
     const oauth2Client = await getAuthorizedOAuthClient(req.user.id);
@@ -141,6 +142,7 @@ export const createMeeting = async (req, res) => {
       source: "google",
       status,
       approvalStatus: "pending",
+      meetingType,
     });
 
     return res.status(201).json({
@@ -159,12 +161,19 @@ export const createMeeting = async (req, res) => {
 export const updateMeetingStatus = async (req, res) => {
   try {
     const { id } = req.params;
-    const { status } = req.body;
+    const { status, cancellationRemark = "" } = req.body;
 
     if (!["upcoming", "completed", "cancelled"].includes(status)) {
       return res.status(400).json({
         success: false,
         message: "Invalid status",
+      });
+    }
+
+    if (status === "cancelled" && !cancellationRemark.trim()) {
+      return res.status(400).json({
+        success: false,
+        message: "Cancellation remark is required",
       });
     }
 
@@ -192,15 +201,48 @@ export const updateMeetingStatus = async (req, res) => {
       });
     }
 
+    if (status === "cancelled" && meeting.googleEventId) {
+      try {
+        const oauthUserId = meeting.createdBy?._id?.toString() || req.user.id;
+        const oauth2Client = await getAuthorizedOAuthClient(oauthUserId);
+        const calendar = google.calendar({ version: "v3", auth: oauth2Client });
+
+        await calendar.events.delete({
+          calendarId: meeting.googleCalendarId || "primary",
+          eventId: meeting.googleEventId,
+          sendUpdates: "all",
+        });
+      } catch (googleError) {
+        console.error("Google calendar cancellation error:", googleError);
+
+        return res.status(500).json({
+          success: false,
+          message:
+            googleError?.response?.data?.error?.message ||
+            "Meeting status not updated because Google Calendar cancellation failed",
+        });
+      }
+    }
+
     meeting.status = status;
+
+    if (status === "cancelled") {
+      meeting.cancellationRemark = cancellationRemark.trim();
+    }
+
     await meeting.save();
 
     return res.status(200).json({
       success: true,
-      message: "Meeting status updated successfully",
+      message:
+        status === "cancelled"
+          ? "Meeting cancelled successfully and attendees notified"
+          : "Meeting status updated successfully",
       meeting,
     });
   } catch (error) {
+    console.error("updateMeetingStatus error:", error);
+
     return res.status(500).json({
       success: false,
       message: error.message || "Failed to update meeting status",

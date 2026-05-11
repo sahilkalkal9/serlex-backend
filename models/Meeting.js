@@ -87,9 +87,19 @@ const meetingSchema = new mongoose.Schema(
       default: false,
     },
     approvalStatus: {
+      type: String,
+      enum: ["pending", "approved", "rejected"],
+      default: "pending",
+    },
+    cancellationRemark: {
+      type: String,
+      default: "",
+      trim: true,
+    },
+    meetingType: {
   type: String,
-  enum: ["pending", "approved", "rejected"],
-  default: "pending",
+  enum: ["client", "team"],
+  default: "client",
 },
   },
   { timestamps: true }

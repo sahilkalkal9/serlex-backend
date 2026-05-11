@@ -4,6 +4,7 @@ import {
   createMeetingReport,
   getMeetingReports,
   getEligibleMeetingsForReport,
+  updateMeetingReport,
 } from "../controllers/meetingReportController.js";
 
 const router = express.Router();
@@ -25,6 +26,14 @@ const allowMeetingReportWriteAccess = (req, res, next) => {
 
 router.get("/", protect, getMeetingReports);
 router.get("/eligible-meetings", protect, getEligibleMeetingsForReport);
+
 router.post("/", protect, allowMeetingReportWriteAccess, createMeetingReport);
+
+router.put(
+  "/:id",
+  protect,
+  allowMeetingReportWriteAccess,
+  updateMeetingReport
+);
 
 export default router;

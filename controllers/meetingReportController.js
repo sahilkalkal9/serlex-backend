@@ -6,6 +6,11 @@ export const createMeetingReport = async (req, res) => {
   try {
     const {
       meetingId,
+
+      // Team report field
+      meetingPoints,
+
+      // Client report fields
       leadId,
       purchaseOrderNumber,
       companyName,
@@ -21,6 +26,13 @@ export const createMeetingReport = async (req, res) => {
       expectedDealValue,
       notes,
     } = req.body;
+
+    if (!meetingId) {
+      return res.status(400).json({
+        success: false,
+        message: "Meeting is required",
+      });
+    }
 
     const meeting = await Meeting.findOne({
       _id: meetingId,
@@ -46,14 +58,64 @@ export const createMeetingReport = async (req, res) => {
       });
     }
 
+    const reportType = meeting.meetingType === "team" ? "team" : "client";
+
+    if (reportType === "team") {
+      if (!meetingPoints?.trim()) {
+        return res.status(400).json({
+          success: false,
+          message: "Meeting points are required for team meeting report",
+        });
+      }
+    }
+
+    if (reportType === "client") {
+      if (!companyName?.trim()) {
+        return res.status(400).json({
+          success: false,
+          message: "Company name is required",
+        });
+      }
+
+      if (!contactPerson?.trim()) {
+        return res.status(400).json({
+          success: false,
+          message: "Contact person is required",
+        });
+      }
+
+      if (!phoneNumber?.trim()) {
+        return res.status(400).json({
+          success: false,
+          message: "Phone number is required",
+        });
+      }
+
+      if (!meetingDateTime) {
+        return res.status(400).json({
+          success: false,
+          message: "Meeting date and time is required",
+        });
+      }
+
+      if (!leadStatus) {
+        return res.status(400).json({
+          success: false,
+          message: "Lead status is required",
+        });
+      }
+
+      if (!["hot", "warm", "cold"].includes(leadStatus)) {
+        return res.status(400).json({
+          success: false,
+          message: "Invalid lead status",
+        });
+      }
+    }
+
     let purchaseOrder = null;
 
-    /*
-      PO creation logic:
-      - If Purchase Order Number is filled, then create PurchaseOrder
-      - poDate is required in PurchaseOrder model, so fallback is current date
-    */
-    if (purchaseOrderNumber) {
+    if (reportType === "client" && purchaseOrderNumber?.trim()) {
       const finalPoNo = purchaseOrderNumber.trim();
 
       const existingPurchaseOrder = await PurchaseOrder.findOne({
@@ -69,7 +131,7 @@ export const createMeetingReport = async (req, res) => {
 
       purchaseOrder = await PurchaseOrder.create({
         poNo: finalPoNo,
-        companyName,
+        companyName: companyName?.trim(),
         category: category || "Trading",
         poValue: Number(expectedDealValue || 0),
         poDate: poDate || new Date(),
@@ -79,25 +141,54 @@ export const createMeetingReport = async (req, res) => {
       });
     }
 
-    const report = await MeetingReport.create({
-      meeting: meetingId,
-      createdBy: req.user.id,
-      leadId,
-      purchaseOrderNumber: purchaseOrderNumber || "",
-      companyName,
-      contactPerson,
-      phoneNumber,
-      meetingDateTime,
-      poDate: poDate || null,
-      poExpectedDeliveryDate: poExpectedDeliveryDate || null,
-      meetingPurpose,
-      category,
-      paymentTerms,
-      leadStatus,
-      expectedDealValue: Number(expectedDealValue || 0),
-      notes,
-      purchaseOrder: purchaseOrder?._id || null,
-    });
+    const reportPayload =
+      reportType === "team"
+        ? {
+            meeting: meetingId,
+            createdBy: req.user.id,
+            reportType: "team",
+            meetingPoints: meetingPoints.trim(),
+
+            companyName: meeting.companyName || "Team Meeting",
+            contactPerson: meeting.personName || "Team",
+            phoneNumber: "",
+            meetingDateTime: meeting.startTime || new Date(),
+            meetingPurpose: meeting.title || "Team Meeting",
+            leadStatus: undefined,
+            expectedDealValue: 0,
+            notes: notes || "",
+            leadId: "",
+            poDate: null,
+            poExpectedDeliveryDate: null,
+            category: "",
+            paymentTerms: "",
+            purchaseOrderNumber: "",
+            purchaseOrder: null,
+          }
+        : {
+            meeting: meetingId,
+            createdBy: req.user.id,
+            reportType: "client",
+            meetingPoints: "",
+
+            leadId: leadId || "",
+            purchaseOrderNumber: purchaseOrderNumber || "",
+            companyName: companyName?.trim(),
+            contactPerson: contactPerson?.trim(),
+            phoneNumber: phoneNumber?.trim(),
+            meetingDateTime,
+            poDate: poDate || null,
+            poExpectedDeliveryDate: poExpectedDeliveryDate || null,
+            meetingPurpose: meetingPurpose || "",
+            category: category || "",
+            paymentTerms: paymentTerms || "",
+            leadStatus,
+            expectedDealValue: Number(expectedDealValue || 0),
+            notes: notes || "",
+            purchaseOrder: purchaseOrder?._id || null,
+          };
+
+    const report = await MeetingReport.create(reportPayload);
 
     await Meeting.findByIdAndUpdate(meetingId, {
       hasReport: true,
@@ -105,13 +196,18 @@ export const createMeetingReport = async (req, res) => {
 
     return res.status(201).json({
       success: true,
-      message: purchaseOrder
-        ? "Meeting report and purchase order added successfully"
-        : "Meeting report added successfully",
+      message:
+        reportType === "team"
+          ? "Team meeting report added successfully"
+          : purchaseOrder
+          ? "Meeting report and purchase order added successfully"
+          : "Meeting report added successfully",
       report,
       purchaseOrder,
     });
   } catch (error) {
+    console.error("createMeetingReport error:", error);
+
     return res.status(500).json({
       success: false,
       message: error.message || "Failed to create meeting report",
@@ -122,7 +218,10 @@ export const createMeetingReport = async (req, res) => {
 export const getMeetingReports = async (req, res) => {
   try {
     const reports = await MeetingReport.find({ createdBy: req.user.id })
-      .populate("meeting", "title personName companyName startTime status")
+      .populate(
+        "meeting",
+        "title personName companyName startTime endTime status meetingType attendees"
+      )
       .populate(
         "purchaseOrder",
         "poNo companyName category poValue poDate expectedDeliveryDate status"
@@ -134,6 +233,8 @@ export const getMeetingReports = async (req, res) => {
       reports,
     });
   } catch (error) {
+    console.error("getMeetingReports error:", error);
+
     return res.status(500).json({
       success: false,
       message: error.message || "Failed to fetch meeting reports",
@@ -147,16 +248,147 @@ export const getEligibleMeetingsForReport = async (req, res) => {
       createdBy: req.user.id,
       status: "completed",
       hasReport: false,
-    }).sort({ startTime: -1 });
+    })
+      .select(
+        "title personName companyName location startTime endTime status meetingType attendees"
+      )
+      .sort({ startTime: -1 });
 
     return res.status(200).json({
       success: true,
       meetings: completedMeetings,
     });
   } catch (error) {
+    console.error("getEligibleMeetingsForReport error:", error);
+
     return res.status(500).json({
       success: false,
       message: error.message || "Failed to fetch eligible meetings",
+    });
+  }
+};
+
+export const updateMeetingReport = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const report = await MeetingReport.findOne({
+      _id: id,
+      createdBy: req.user.id,
+    }).populate("meeting", "meetingType");
+
+    if (!report) {
+      return res.status(404).json({
+        success: false,
+        message: "Meeting report not found",
+      });
+    }
+
+    const reportType =
+      report.reportType === "team" || report.meeting?.meetingType === "team"
+        ? "team"
+        : "client";
+
+    if (reportType === "team") {
+      const { meetingPoints, notes } = req.body;
+
+      if (!meetingPoints?.trim()) {
+        return res.status(400).json({
+          success: false,
+          message: "Meeting points are required",
+        });
+      }
+
+      report.meetingPoints = meetingPoints.trim();
+      report.notes = notes || report.notes || "";
+    } else {
+      const {
+        companyName,
+        contactPerson,
+        phoneNumber,
+        purchaseOrderNumber,
+        meetingDateTime,
+        meetingPurpose,
+        category,
+        paymentTerms,
+        leadStatus,
+        expectedDealValue,
+        notes,
+      } = req.body;
+
+      if (!companyName?.trim()) {
+        return res.status(400).json({
+          success: false,
+          message: "Company name is required",
+        });
+      }
+
+      if (!contactPerson?.trim()) {
+        return res.status(400).json({
+          success: false,
+          message: "Contact person is required",
+        });
+      }
+
+      if (!phoneNumber?.trim()) {
+        return res.status(400).json({
+          success: false,
+          message: "Phone number is required",
+        });
+      }
+
+      if (leadStatus && !["hot", "warm", "cold"].includes(leadStatus)) {
+        return res.status(400).json({
+          success: false,
+          message: "Invalid lead status",
+        });
+      }
+
+      report.companyName = companyName.trim();
+      report.contactPerson = contactPerson.trim();
+      report.phoneNumber = phoneNumber.trim();
+      report.purchaseOrderNumber = purchaseOrderNumber || "";
+      report.meetingDateTime = meetingDateTime || report.meetingDateTime;
+      report.meetingPurpose = meetingPurpose || "";
+      report.category = category || "";
+      report.paymentTerms = paymentTerms || "";
+      report.leadStatus = leadStatus || report.leadStatus;
+      report.expectedDealValue = Number(expectedDealValue || 0);
+      report.notes = notes || "";
+
+      if (report.purchaseOrder) {
+        await PurchaseOrder.findByIdAndUpdate(report.purchaseOrder, {
+          poNo: purchaseOrderNumber || report.purchaseOrderNumber,
+          companyName: companyName.trim(),
+          category: category || "Trading",
+          poValue: Number(expectedDealValue || 0),
+        });
+      }
+    }
+
+    await report.save();
+
+    const updatedReport = await MeetingReport.findById(report._id)
+      .populate(
+        "meeting",
+        "title personName companyName startTime endTime status meetingType attendees"
+      )
+      .populate(
+        "purchaseOrder",
+        "poNo companyName category poValue poDate expectedDeliveryDate status"
+      );
+
+    return res.status(200).json({
+      success: true,
+      message: "Meeting report updated successfully",
+      report: updatedReport,
+    });
+  } catch (error) {
+    console.error("updateMeetingReport error:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: error.message || "Failed to update meeting report",
     });
   }
 };
