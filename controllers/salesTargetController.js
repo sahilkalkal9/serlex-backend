@@ -375,3 +375,164 @@ export const getSalesTargetPODetails = async (req, res) => {
     });
   }
 };
+
+export const getMySalesTargetReport = async (req, res) => {
+  try {
+    const salesUserId = getUserId(req);
+    const { period = "Monthly", periodKey } = req.query;
+
+    if (!salesUserId || !periodKey) {
+      return res.status(400).json({
+        success: false,
+        message: "Period key is required",
+      });
+    }
+
+    if (!["Monthly", "Quarterly", "Yearly"].includes(period)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid period",
+      });
+    }
+
+    const dateRange = getPeriodDateRange(period, periodKey);
+
+    if (!dateRange) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid period key",
+      });
+    }
+
+    const target = await SalesTarget.findOne({
+      salesUser: salesUserId,
+      period,
+      periodKey,
+    })
+      .populate("salesUser", "name email employeeId mobileNumber designation department")
+      .populate("createdBy", "name email role subRole designation")
+      .populate("updatedBy", "name email role subRole designation");
+
+    const achievedRows = await PurchaseOrder.aggregate([
+      {
+        $match: {
+          createdBy: new mongoose.Types.ObjectId(salesUserId),
+          poDate: {
+            $gte: dateRange.startDate,
+            $lte: dateRange.endDate,
+          },
+        },
+      },
+      {
+        $group: {
+          _id: "$createdBy",
+          achievedAmount: { $sum: "$poValue" },
+          poCount: { $sum: 1 },
+        },
+      },
+    ]);
+
+    const achievedAmount = Number(achievedRows?.[0]?.achievedAmount || 0);
+    const poCount = Number(achievedRows?.[0]?.poCount || 0);
+    const targetAmount = Number(target?.targetAmount || 0);
+
+    const achievementPercentage =
+      targetAmount > 0 ? (achievedAmount / targetAmount) * 100 : 0;
+
+    const row = {
+      salesUser: target?.salesUser || null,
+      targetId: target?._id || null,
+      period,
+      periodKey,
+      targetAmount,
+      achievedAmount,
+      poCount,
+      achievementPercentage,
+      pendingAmount: Math.max(targetAmount - achievedAmount, 0),
+      overAchievedAmount:
+        achievedAmount > targetAmount ? achievedAmount - targetAmount : 0,
+      remarks: target?.remarks || "",
+      targetGivenBy: target?.createdBy || null,
+      updatedBy: target?.updatedBy || null,
+      formattedTarget: formatMoney(targetAmount),
+      formattedAchieved: formatMoney(achievedAmount),
+    };
+
+    return res.status(200).json({
+      success: true,
+      target: row,
+      cards: {
+        targetAmount,
+        achievedAmount,
+        totalTarget: targetAmount,
+        totalAchieved: achievedAmount,
+        totalPOs: poCount,
+        achievementPercentage,
+        formattedTotalTarget: formatMoney(targetAmount),
+        formattedTotalAchieved: formatMoney(achievedAmount),
+      },
+    });
+  } catch (error) {
+    console.error("getMySalesTargetReport error:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: error.message || "Failed to fetch my target report",
+    });
+  }
+};
+
+export const getMySalesTargetPODetails = async (req, res) => {
+  try {
+    const salesUserId = getUserId(req);
+    const { period = "Monthly", periodKey } = req.query;
+
+    if (!salesUserId || !periodKey) {
+      return res.status(400).json({
+        success: false,
+        message: "Period key is required",
+      });
+    }
+
+    if (!["Monthly", "Quarterly", "Yearly"].includes(period)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid period",
+      });
+    }
+
+    const dateRange = getPeriodDateRange(period, periodKey);
+
+    if (!dateRange) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid period key",
+      });
+    }
+
+    const orders = await PurchaseOrder.find({
+      createdBy: salesUserId,
+      poDate: {
+        $gte: dateRange.startDate,
+        $lte: dateRange.endDate,
+      },
+    })
+      .select(
+        "poNo companyName category poValue poDate status trackingStatus expectedDeliveryDate deliveryDate"
+      )
+      .sort({ poDate: -1 });
+
+    return res.status(200).json({
+      success: true,
+      count: orders.length,
+      orders,
+    });
+  } catch (error) {
+    console.error("getMySalesTargetPODetails error:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: error.message || "Failed to fetch my PO details",
+    });
+  }
+};
