@@ -15,6 +15,7 @@ import purchaseOrderRoutes from "./routes/purchaseOrderRoutes.js";
 import vendorRoutes from "./routes/vendorRoutes.js";
 import purchaseTeamRoutes from "./routes/purchaseTeamRoutes.js";
 import ppcTeamRoutes from "./routes/ppcTeamRoutes.js";
+import salesTargetRoutes from "./routes/salesTargetRoutes.js";
 
 
 dotenv.config();
@@ -74,6 +75,7 @@ app.use("/api/purchase-orders", purchaseOrderRoutes);
 app.use("/api/vendors", vendorRoutes);
 app.use("/api/purchase-team", purchaseTeamRoutes);
 app.use("/api/ppc-team", ppcTeamRoutes);
+app.use("/api/sales-targets", salesTargetRoutes);
 
 
 const getSelfPingUrl = () => {

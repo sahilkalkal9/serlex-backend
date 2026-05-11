@@ -10,6 +10,7 @@ import {
   updateMeetingApprovalStatus,
   getSalesUsersMeetings,
   createMeetingForSalesUser,
+  respondToMeetingInvite,
 } from "../controllers/meetingController.js";
 
 const router = express.Router();
@@ -54,15 +55,23 @@ router.patch(
 router.patch(
   "/:id/approval",
   protect,
-  authorizeRoles(["admin", "subadmin", "superadmin"]),
+  authorizeRoles(["admin", "subadmin", "superadmin", "sales_user",
+    "purchase_user",
+    "ppc_user",]),
   updateMeetingApprovalStatus
 );
 
 router.post(
   "/sales-users",
   protect,
-  authorizeRoles(["admin", "subadmin", "superadmin"]),
+  authorizeRoles(["admin", "subadmin", "superadmin", "sales_user",
+    "purchase_user",
+    "ppc_user",]),
   createMeetingForSalesUser
 );
+router.patch("/:id/invite-response", protect,
+  authorizeRoles(["admin", "subadmin", "superadmin", "sales_user",
+    "purchase_user",
+    "ppc_user",]), respondToMeetingInvite);
 
 export default router;

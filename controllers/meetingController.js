@@ -3,6 +3,37 @@ import Meeting from "../models/Meeting.js";
 import User from "../models/User.js";
 import { getAuthorizedOAuthClient } from "../utils/googleClient.js";
 
+const normalizeAttendees = (attendees = []) => {
+  if (!Array.isArray(attendees)) return [];
+
+  return attendees
+    .map((item) => {
+      if (typeof item === "string") return item.trim().toLowerCase();
+      return item?.email?.trim()?.toLowerCase();
+    })
+    .filter(Boolean);
+};
+
+const buildAttendeeResponses = (emails = []) => {
+  return emails.map((email) => ({
+    email,
+    status: "pending",
+    rejectionReason: "",
+    respondedAt: null,
+    respondedBy: null,
+  }));
+};
+
+const populateMeetingQuery = (query) => {
+  return query
+    .populate(
+      "createdBy",
+      "name email employeeId mobileNumber department designation role subRole"
+    )
+    .populate("cancelledBy", "name email role subRole")
+    .populate("attendeeResponses.respondedBy", "name email role subRole");
+};
+
 export const getMeetings = async (req, res) => {
   try {
     const { status } = req.query;
@@ -13,13 +44,17 @@ export const getMeetings = async (req, res) => {
       query.status = status;
     }
 
-    const meetings = await Meeting.find(query).sort({ startTime: 1 });
+    const meetings = await populateMeetingQuery(
+      Meeting.find(query)
+    ).sort({ startTime: 1 });
 
     return res.status(200).json({
       success: true,
       meetings,
     });
   } catch (error) {
+    console.error("getMeetings error:", error);
+
     return res.status(500).json({
       success: false,
       message: error.message || "Failed to fetch meetings",
@@ -58,12 +93,9 @@ export const getSalesUsersMeetings = async (req, res) => {
       ];
     }
 
-    const meetings = await Meeting.find(query)
-      .populate(
-        "createdBy",
-        "name email employeeId mobileNumber department designation role"
-      )
-      .sort({ startTime: 1 });
+    const meetings = await populateMeetingQuery(
+      Meeting.find(query)
+    ).sort({ startTime: 1 });
 
     return res.status(200).json({
       success: true,
@@ -72,6 +104,7 @@ export const getSalesUsersMeetings = async (req, res) => {
     });
   } catch (error) {
     console.error("getSalesUsersMeetings error:", error);
+
     return res.status(500).json({
       success: false,
       message: error.message || "Failed to fetch sales users meetings",
@@ -99,13 +132,43 @@ export const createMeeting = async (req, res) => {
       meetingType = "client",
     } = req.body;
 
+    if (!title?.trim()) {
+      return res.status(400).json({
+        success: false,
+        message: "Meeting title is required",
+      });
+    }
+
+    if (!startTime || !endTime) {
+      return res.status(400).json({
+        success: false,
+        message: "Start time and end time are required",
+      });
+    }
+
+    if (!["client", "team"].includes(meetingType)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid meeting type",
+      });
+    }
+
+    if (meetingType === "client" && !personName?.trim()) {
+      return res.status(400).json({
+        success: false,
+        message: "Person name is required for client meeting",
+      });
+    }
+
+    const attendeeEmails = normalizeAttendees(attendees);
+
     const oauth2Client = await getAuthorizedOAuthClient(req.user.id);
     const calendar = google.calendar({ version: "v3", auth: oauth2Client });
 
     const eventPayload = {
       summary: title,
       description,
-      location,
+      location: meetingType === "team" ? "" : location || "",
       start: {
         dateTime: new Date(startTime).toISOString(),
         timeZone: "Asia/Kolkata",
@@ -114,27 +177,30 @@ export const createMeeting = async (req, res) => {
         dateTime: new Date(endTime).toISOString(),
         timeZone: "Asia/Kolkata",
       },
-      attendees: attendees.map((email) => ({ email })),
+      attendees: attendeeEmails.map((email) => ({ email })),
     };
 
     const googleResponse = await calendar.events.insert({
       calendarId: "primary",
       requestBody: eventPayload,
+      sendUpdates: "all",
     });
 
     const meeting = await Meeting.create({
       title,
-      personName,
+      personName:
+        meetingType === "team" ? "Team Meeting" : personName?.trim(),
       designation,
       experienceYears,
       rating,
       reviewsCount,
-      companyName,
+      companyName: meetingType === "team" ? "" : companyName || "",
       description,
-      location,
+      location: meetingType === "team" ? "" : location || "",
       startTime,
       endTime,
-      attendees: attendees.map((email) => ({ email })),
+      attendees: attendeeEmails.map((email) => ({ email })),
+      attendeeResponses: buildAttendeeResponses(attendeeEmails),
       avatarUrl,
       createdBy: req.user.id,
       googleEventId: googleResponse.data.id || "",
@@ -151,6 +217,8 @@ export const createMeeting = async (req, res) => {
       meeting,
     });
   } catch (error) {
+    console.error("createMeeting error:", error);
+
     return res.status(500).json({
       success: false,
       message: error.message || "Failed to create meeting",
@@ -228,9 +296,14 @@ export const updateMeetingStatus = async (req, res) => {
 
     if (status === "cancelled") {
       meeting.cancellationRemark = cancellationRemark.trim();
+      meeting.cancelledBy = req.user.id;
     }
 
     await meeting.save();
+
+    const updatedMeeting = await populateMeetingQuery(
+      Meeting.findById(meeting._id)
+    );
 
     return res.status(200).json({
       success: true,
@@ -238,7 +311,7 @@ export const updateMeetingStatus = async (req, res) => {
         status === "cancelled"
           ? "Meeting cancelled successfully and attendees notified"
           : "Meeting status updated successfully",
-      meeting,
+      meeting: updatedMeeting,
     });
   } catch (error) {
     console.error("updateMeetingStatus error:", error);
@@ -246,6 +319,104 @@ export const updateMeetingStatus = async (req, res) => {
     return res.status(500).json({
       success: false,
       message: error.message || "Failed to update meeting status",
+    });
+  }
+};
+
+export const respondToMeetingInvite = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { responseStatus, rejectionReason = "" } = req.body;
+
+    if (!["approved", "rejected"].includes(responseStatus)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid response status",
+      });
+    }
+
+    if (responseStatus === "rejected" && !rejectionReason.trim()) {
+      return res.status(400).json({
+        success: false,
+        message: "Rejection reason is required",
+      });
+    }
+
+    const meeting = await Meeting.findById(id);
+
+    if (!meeting) {
+      return res.status(404).json({
+        success: false,
+        message: "Meeting not found",
+      });
+    }
+
+    if (meeting.status === "cancelled") {
+      return res.status(400).json({
+        success: false,
+        message: "Cannot respond to a cancelled meeting",
+      });
+    }
+
+    const userEmail = req.user.email?.toLowerCase();
+
+    if (!userEmail) {
+      return res.status(400).json({
+        success: false,
+        message: "User email not found",
+      });
+    }
+
+    const isInvited = meeting.attendees?.some((attendee) => {
+      return attendee?.email?.toLowerCase() === userEmail;
+    });
+
+    if (!isInvited) {
+      return res.status(403).json({
+        success: false,
+        message: "You are not invited to this meeting",
+      });
+    }
+
+    const existingIndex = meeting.attendeeResponses.findIndex(
+      (item) => item.email?.toLowerCase() === userEmail
+    );
+
+    const responsePayload = {
+      email: userEmail,
+      status: responseStatus,
+      rejectionReason:
+        responseStatus === "rejected" ? rejectionReason.trim() : "",
+      respondedAt: new Date(),
+      respondedBy: req.user.id,
+    };
+
+    if (existingIndex >= 0) {
+      meeting.attendeeResponses[existingIndex] = responsePayload;
+    } else {
+      meeting.attendeeResponses.push(responsePayload);
+    }
+
+    await meeting.save();
+
+    const updatedMeeting = await populateMeetingQuery(
+      Meeting.findById(meeting._id)
+    );
+
+    return res.status(200).json({
+      success: true,
+      message:
+        responseStatus === "approved"
+          ? "Meeting invite approved"
+          : "Meeting invite rejected",
+      meeting: updatedMeeting,
+    });
+  } catch (error) {
+    console.error("respondToMeetingInvite error:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: error.message || "Failed to respond to meeting invite",
     });
   }
 };
@@ -295,12 +466,18 @@ export const updateMeetingApprovalStatus = async (req, res) => {
     meeting.approvalStatus = approvalStatus;
     await meeting.save();
 
+    const updatedMeeting = await populateMeetingQuery(
+      Meeting.findById(meeting._id)
+    );
+
     return res.status(200).json({
       success: true,
       message: `Meeting ${approvalStatus} successfully`,
-      meeting,
+      meeting: updatedMeeting,
     });
   } catch (error) {
+    console.error("updateMeetingApprovalStatus error:", error);
+
     return res.status(500).json({
       success: false,
       message: error.message || "Failed to update meeting approval status",
@@ -326,12 +503,20 @@ export const createMeetingForSalesUser = async (req, res) => {
       attendees = [],
       avatarUrl = "",
       status = "upcoming",
+      meetingType = "client",
     } = req.body;
 
     if (!salesUserId) {
       return res.status(400).json({
         success: false,
         message: "Sales user is required",
+      });
+    }
+
+    if (!["client", "team"].includes(meetingType)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid meeting type",
       });
     }
 
@@ -347,13 +532,22 @@ export const createMeetingForSalesUser = async (req, res) => {
       });
     }
 
+    if (meetingType === "client" && !personName?.trim()) {
+      return res.status(400).json({
+        success: false,
+        message: "Person name is required for client meeting",
+      });
+    }
+
+    const attendeeEmails = normalizeAttendees(attendees);
+
     const oauth2Client = await getAuthorizedOAuthClient(salesUserId);
     const calendar = google.calendar({ version: "v3", auth: oauth2Client });
 
     const eventPayload = {
       summary: title,
       description,
-      location,
+      location: meetingType === "team" ? "" : location || "",
       start: {
         dateTime: new Date(startTime).toISOString(),
         timeZone: "Asia/Kolkata",
@@ -362,27 +556,30 @@ export const createMeetingForSalesUser = async (req, res) => {
         dateTime: new Date(endTime).toISOString(),
         timeZone: "Asia/Kolkata",
       },
-      attendees: attendees.map((email) => ({ email })),
+      attendees: attendeeEmails.map((email) => ({ email })),
     };
 
     const googleResponse = await calendar.events.insert({
       calendarId: "primary",
       requestBody: eventPayload,
+      sendUpdates: "all",
     });
 
     const meeting = await Meeting.create({
       title,
-      personName,
+      personName:
+        meetingType === "team" ? "Team Meeting" : personName?.trim(),
       designation,
       experienceYears,
       rating,
       reviewsCount,
-      companyName,
+      companyName: meetingType === "team" ? "" : companyName || "",
       description,
-      location,
+      location: meetingType === "team" ? "" : location || "",
       startTime,
       endTime,
-      attendees: attendees.map((email) => ({ email })),
+      attendees: attendeeEmails.map((email) => ({ email })),
+      attendeeResponses: buildAttendeeResponses(attendeeEmails),
       avatarUrl,
       createdBy: salesUserId,
       googleEventId: googleResponse.data.id || "",
@@ -390,6 +587,7 @@ export const createMeetingForSalesUser = async (req, res) => {
       source: "google",
       status,
       approvalStatus: "pending",
+      meetingType,
     });
 
     return res.status(201).json({
@@ -398,6 +596,8 @@ export const createMeetingForSalesUser = async (req, res) => {
       meeting,
     });
   } catch (error) {
+    console.error("createMeetingForSalesUser error:", error);
+
     return res.status(500).json({
       success: false,
       message: error.message || "Failed to create meeting for sales user",

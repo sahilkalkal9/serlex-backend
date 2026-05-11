@@ -97,10 +97,50 @@ const meetingSchema = new mongoose.Schema(
       trim: true,
     },
     meetingType: {
-  type: String,
-  enum: ["client", "team"],
-  default: "client",
-},
+      type: String,
+      enum: ["client", "team"],
+      default: "client",
+    },
+    attendeeResponses: [
+      {
+        email: {
+          type: String,
+          trim: true,
+          lowercase: true,
+        },
+        status: {
+          type: String,
+          enum: ["pending", "approved", "rejected"],
+          default: "pending",
+        },
+        rejectionReason: {
+          type: String,
+          default: "",
+          trim: true,
+        },
+        respondedAt: {
+          type: Date,
+          default: null,
+        },
+        respondedBy: {
+          type: mongoose.Schema.Types.ObjectId,
+          ref: "User",
+          default: null,
+        },
+      },
+    ],
+
+    cancelledBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+      default: null,
+    },
+
+    cancellationRemark: {
+      type: String,
+      default: "",
+      trim: true,
+    },
   },
   { timestamps: true }
 );

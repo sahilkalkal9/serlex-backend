@@ -1,6 +1,35 @@
 import Meeting from "../models/Meeting.js";
 import MeetingReport from "../models/MeetingReport.js";
 import PurchaseOrder from "../models/PurchaseOrder.js";
+import User from "../models/User.js";
+
+const isAdminUser = (user) => {
+  return ["admin", "superadmin"].includes(user?.role);
+};
+
+const isSalesManager = (user) => {
+  return user?.role === "subadmin" && user?.subRole === "sales_manager";
+};
+
+const getUserId = (req) => {
+  return req.user?._id || req.user?.id || null;
+};
+
+const getReportPopulateQuery = (query) => {
+  return query
+    .populate(
+      "meeting",
+      "title personName companyName startTime endTime status meetingType attendees"
+    )
+    .populate(
+      "createdBy",
+      "name email employeeId mobileNumber department designation role subRole"
+    )
+    .populate(
+      "purchaseOrder",
+      "poNo companyName category poValue poDate expectedDeliveryDate status trackingStatus"
+    );
+};
 
 export const createMeetingReport = async (req, res) => {
   try {
@@ -36,7 +65,7 @@ export const createMeetingReport = async (req, res) => {
 
     const meeting = await Meeting.findOne({
       _id: meetingId,
-      createdBy: req.user.id,
+      createdBy: getUserId(req),
       status: "completed",
     });
 
@@ -138,6 +167,14 @@ export const createMeetingReport = async (req, res) => {
         expectedDeliveryDate: poExpectedDeliveryDate || null,
         deliveryDate: null,
         status: "Pending",
+
+        // Important for sales target achievement calculation
+        createdBy: getUserId(req),
+
+        // Defaults for tracking flow
+        trackingStatus: "Not Approved",
+        activityStatus: "Not Ordered",
+        processingStatus: "Pending",
       });
     }
 
@@ -145,7 +182,7 @@ export const createMeetingReport = async (req, res) => {
       reportType === "team"
         ? {
             meeting: meetingId,
-            createdBy: req.user.id,
+            createdBy: getUserId(req),
             reportType: "team",
             meetingPoints: meetingPoints.trim(),
 
@@ -167,7 +204,7 @@ export const createMeetingReport = async (req, res) => {
           }
         : {
             meeting: meetingId,
-            createdBy: req.user.id,
+            createdBy: getUserId(req),
             reportType: "client",
             meetingPoints: "",
 
@@ -194,6 +231,10 @@ export const createMeetingReport = async (req, res) => {
       hasReport: true,
     });
 
+    const populatedReport = await getReportPopulateQuery(
+      MeetingReport.findById(report._id)
+    );
+
     return res.status(201).json({
       success: true,
       message:
@@ -202,7 +243,7 @@ export const createMeetingReport = async (req, res) => {
           : purchaseOrder
           ? "Meeting report and purchase order added successfully"
           : "Meeting report added successfully",
-      report,
+      report: populatedReport,
       purchaseOrder,
     });
   } catch (error) {
@@ -217,16 +258,26 @@ export const createMeetingReport = async (req, res) => {
 
 export const getMeetingReports = async (req, res) => {
   try {
-    const reports = await MeetingReport.find({ createdBy: req.user.id })
-      .populate(
-        "meeting",
-        "title personName companyName startTime endTime status meetingType attendees"
-      )
-      .populate(
-        "purchaseOrder",
-        "poNo companyName category poValue poDate expectedDeliveryDate status"
-      )
-      .sort({ createdAt: -1 });
+    let query = {};
+
+    if (isAdminUser(req.user)) {
+      query = {};
+    } else if (isSalesManager(req.user)) {
+      const salesUsers = await User.find({ role: "sales_user" }).select("_id");
+      const salesUserIds = salesUsers.map((user) => user._id);
+
+      query = {
+        createdBy: { $in: salesUserIds },
+      };
+    } else {
+      query = {
+        createdBy: getUserId(req),
+      };
+    }
+
+    const reports = await getReportPopulateQuery(
+      MeetingReport.find(query)
+    ).sort({ createdAt: -1 });
 
     return res.status(200).json({
       success: true,
@@ -245,7 +296,7 @@ export const getMeetingReports = async (req, res) => {
 export const getEligibleMeetingsForReport = async (req, res) => {
   try {
     const completedMeetings = await Meeting.find({
-      createdBy: req.user.id,
+      createdBy: getUserId(req),
       status: "completed",
       hasReport: false,
     })
@@ -272,10 +323,16 @@ export const updateMeetingReport = async (req, res) => {
   try {
     const { id } = req.params;
 
-    const report = await MeetingReport.findOne({
-      _id: id,
-      createdBy: req.user.id,
-    }).populate("meeting", "meetingType");
+    let query = { _id: id };
+
+    if (!isAdminUser(req.user) && !isSalesManager(req.user)) {
+      query.createdBy = getUserId(req);
+    }
+
+    const report = await MeetingReport.findOne(query).populate(
+      "meeting",
+      "meetingType"
+    );
 
     if (!report) {
       return res.status(404).json({
@@ -368,15 +425,9 @@ export const updateMeetingReport = async (req, res) => {
 
     await report.save();
 
-    const updatedReport = await MeetingReport.findById(report._id)
-      .populate(
-        "meeting",
-        "title personName companyName startTime endTime status meetingType attendees"
-      )
-      .populate(
-        "purchaseOrder",
-        "poNo companyName category poValue poDate expectedDeliveryDate status"
-      );
+    const updatedReport = await getReportPopulateQuery(
+      MeetingReport.findById(report._id)
+    );
 
     return res.status(200).json({
       success: true,

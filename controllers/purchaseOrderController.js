@@ -1376,3 +1376,125 @@ export const updatePOActionStatus = async (req, res) => {
     });
   }
 };
+
+export const getSalesManagerPOTrackingOrders = async (req, res) => {
+  try {
+    const isSalesManager =
+      req.user?.role === "subadmin" && req.user?.subRole === "sales_manager";
+
+    const isAdmin = ["admin", "superadmin"].includes(req.user?.role);
+
+    if (!isSalesManager && !isAdmin) {
+      return res.status(403).json({
+        success: false,
+        message: "Access denied",
+      });
+    }
+
+    const { fromDate, toDate, category, status, search } = req.query;
+
+    const filter = {
+      ...getDateRangeFilter(fromDate, toDate, "poDate"),
+    };
+
+    if (category && category !== "All" && category !== "all") {
+      filter.category = category;
+    }
+
+    if (status && status !== "All" && status !== "all") {
+      filter.$or = [
+        { trackingStatus: status },
+        { status },
+        { processingStatus: status },
+        { activityStatus: status },
+      ];
+    }
+
+    if (search) {
+      filter.$or = [
+        { poNo: { $regex: search, $options: "i" } },
+        { companyName: { $regex: search, $options: "i" } },
+        { vendorName: { $regex: search, $options: "i" } },
+        { category: { $regex: search, $options: "i" } },
+        { trackingStatus: { $regex: search, $options: "i" } },
+        { status: { $regex: search, $options: "i" } },
+      ];
+    }
+
+    const orders = await PurchaseOrder.find(filter)
+      .populate("approvedBy", "name email designation role subRole")
+      .populate("processedBy", "name email designation role subRole")
+      .populate("createdBy", "name email designation role subRole")
+      .sort({ poDate: -1 });
+
+    const rows = orders.map((order) => ({
+      _id: order._id,
+
+      poNo: order.poNo,
+      companyName: order.companyName,
+      vendorCompany: order.vendorName || order.companyName,
+      vendorName: order.vendorName || "",
+      category: order.category,
+
+      poValue: order.poValue,
+      formattedPOValue: formatMoney(order.poValue),
+
+      poDate: order.poDate,
+      expectedDeliveryDate: order.expectedDeliveryDate,
+      deliveryDate: order.deliveryDate,
+
+      status: order.status,
+      isApproved: order.isApproved,
+      approvedBy: order.approvedBy,
+      approvedDate: order.approvedDate,
+      approvalRemarks: order.approvalRemarks || "",
+
+      activityStatus: order.activityStatus,
+
+      processingStatus: order.processingStatus,
+      processedBy: order.processedBy,
+      processedDate: order.processedDate,
+      processingRemarks: order.processingRemarks || "",
+
+      trackingStatus: order.trackingStatus,
+      currentStatus: order.trackingStatus || order.status,
+      trackingRemarks: order.trackingRemarks || "",
+
+      paymentReceivedDate: order.paymentReceivedDate,
+
+      createdBy: order.createdBy,
+      remarks: order.remarks || "",
+      createdAt: order.createdAt,
+      updatedAt: order.updatedAt,
+    }));
+
+    const totalPOValue = rows.reduce(
+      (sum, order) => sum + Number(order.poValue || 0),
+      0
+    );
+
+    return res.status(200).json({
+      success: true,
+      cards: {
+        totalPOs: rows.length,
+        trading: rows.filter((item) => item.category === "Trading").length,
+        manufacturing: rows.filter((item) => item.category === "Manufacturing")
+          .length,
+        service: rows.filter((item) => item.category === "Service").length,
+        approved: rows.filter((item) => item.isApproved).length,
+        notApproved: rows.filter((item) => !item.isApproved).length,
+        completed: rows.filter((item) => item.status === "Completed").length,
+        totalPOValue: formatMoney(totalPOValue),
+      },
+      rows,
+    });
+  } catch (error) {
+    console.error("getSalesManagerPOTrackingOrders error:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Failed to fetch sales manager PO tracking orders",
+      error: error.message,
+    });
+  }
+};
