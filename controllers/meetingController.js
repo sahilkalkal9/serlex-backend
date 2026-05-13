@@ -604,3 +604,179 @@ export const createMeetingForSalesUser = async (req, res) => {
     });
   }
 };
+
+export const getPurchaseMeetings = async (req, res) => {
+  try {
+    const {
+      status,
+      approvalStatus,
+      memberId,
+      fromDate,
+      toDate,
+      search = "",
+    } = req.query;
+
+    const currentUserId = req.user.id;
+    const currentUserEmail = req.user.email?.toLowerCase();
+
+    const purchaseUsers = await User.find({ role: "purchase_user" }).select("_id");
+    const purchaseUserIds = purchaseUsers.map((user) => user._id);
+
+    const query = {
+      $or: [
+        { createdBy: { $in: purchaseUserIds } },
+        { createdBy: currentUserId },
+      ],
+    };
+
+    if (currentUserEmail) {
+      query.$or.push({ "attendees.email": currentUserEmail });
+    }
+
+    if (memberId) {
+      query.createdBy = memberId;
+    }
+
+    if (status && ["upcoming", "completed", "cancelled"].includes(status)) {
+      query.status = status;
+    }
+
+    if (
+      approvalStatus &&
+      ["pending", "approved", "rejected"].includes(approvalStatus)
+    ) {
+      query.approvalStatus = approvalStatus;
+    }
+
+    if (fromDate || toDate) {
+      query.startTime = {};
+
+      if (fromDate) {
+        query.startTime.$gte = new Date(`${fromDate}T00:00:00.000Z`);
+      }
+
+      if (toDate) {
+        query.startTime.$lte = new Date(`${toDate}T23:59:59.999Z`);
+      }
+    }
+
+    if (search.trim()) {
+      query.$and = [
+        {
+          $or: [
+            { title: { $regex: search.trim(), $options: "i" } },
+            { personName: { $regex: search.trim(), $options: "i" } },
+            { companyName: { $regex: search.trim(), $options: "i" } },
+            { location: { $regex: search.trim(), $options: "i" } },
+            { description: { $regex: search.trim(), $options: "i" } },
+          ],
+        },
+      ];
+    }
+
+    const meetings = await populateMeetingQuery(
+      Meeting.find(query)
+    ).sort({ startTime: 1 });
+
+    return res.status(200).json({
+      success: true,
+      count: meetings.length,
+      meetings,
+    });
+  } catch (error) {
+    console.error("getPurchaseMeetings error:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: error.message || "Failed to fetch purchase meetings",
+    });
+  }
+};
+
+export const getPpcMeetings = async (req, res) => {
+  try {
+    const {
+      status,
+      approvalStatus,
+      memberId,
+      fromDate,
+      toDate,
+      search = "",
+    } = req.query;
+
+    const currentUserId = req.user.id;
+    const currentUserEmail = req.user.email?.toLowerCase();
+
+    const ppcUsers = await User.find({ role: "ppc_user" }).select("_id");
+    const ppcUserIds = ppcUsers.map((user) => user._id);
+
+    const query = {
+      $or: [
+        { createdBy: { $in: ppcUserIds } },
+        { createdBy: currentUserId },
+      ],
+    };
+
+    if (currentUserEmail) {
+      query.$or.push({ "attendees.email": currentUserEmail });
+    }
+
+    if (memberId) {
+      query.createdBy = memberId;
+    }
+
+    if (status && ["upcoming", "completed", "cancelled"].includes(status)) {
+      query.status = status;
+    }
+
+    if (
+      approvalStatus &&
+      ["pending", "approved", "rejected"].includes(approvalStatus)
+    ) {
+      query.approvalStatus = approvalStatus;
+    }
+
+    if (fromDate || toDate) {
+      query.startTime = {};
+
+      if (fromDate) {
+        query.startTime.$gte = new Date(`${fromDate}T00:00:00.000Z`);
+      }
+
+      if (toDate) {
+        query.startTime.$lte = new Date(`${toDate}T23:59:59.999Z`);
+      }
+    }
+
+    if (search.trim()) {
+      query.$and = [
+        {
+          $or: [
+            { title: { $regex: search.trim(), $options: "i" } },
+            { personName: { $regex: search.trim(), $options: "i" } },
+            { companyName: { $regex: search.trim(), $options: "i" } },
+            { location: { $regex: search.trim(), $options: "i" } },
+            { description: { $regex: search.trim(), $options: "i" } },
+          ],
+        },
+      ];
+    }
+
+    const meetings = await populateMeetingQuery(
+      Meeting.find(query)
+    ).sort({ startTime: 1 });
+
+    return res.status(200).json({
+      success: true,
+      count: meetings.length,
+      meetings,
+    });
+  } catch (error) {
+    console.error("getPpcMeetings error:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: error.message || "Failed to fetch PPC meetings",
+    });
+  }
+};

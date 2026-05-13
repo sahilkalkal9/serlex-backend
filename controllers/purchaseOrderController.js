@@ -565,13 +565,20 @@ export const getProcessingPurchaseOrders = async (req, res) => {
 
 export const getApprovedPurchaseOrders = async (req, res) => {
   try {
-    const { fromDate, toDate, processingStatus, teamMemberId, search } =
+    const { fromDate, toDate, processingStatus, teamMemberId, search, category } =
       req.query;
 
     const filter = {
-      category: { $in: ["Manufacturing", "Service"] },
+      category: { $in: ["Manufacturing", "Service", "Services"] },
       ...getDateRangeFilter(fromDate, toDate, "poDate"),
     };
+
+    if (category && category !== "All") {
+      filter.category =
+        category === "Service" || category === "Services"
+          ? { $in: ["Service", "Services"] }
+          : category;
+    }
 
     if (processingStatus && processingStatus !== "All") {
       filter.processingStatus = processingStatus;
@@ -591,9 +598,10 @@ export const getApprovedPurchaseOrders = async (req, res) => {
     }
 
     const orders = await PurchaseOrder.find(filter)
-      .populate("approvedBy", "name email designation")
-      .populate("processedBy", "name email designation")
-      .populate("createdBy", "name email designation")
+      .populate("approvedBy", "name email designation role subRole")
+      .populate("processedBy", "name email designation role subRole")
+      .populate("createdBy", "name email designation role subRole")
+      .populate("statusLogs.updatedBy", "name email designation role subRole")
       .sort({ poDate: -1 });
 
     const totalValue = orders.reduce(
@@ -620,7 +628,7 @@ export const getApprovedPurchaseOrders = async (req, res) => {
     return res.status(200).json({
       success: true,
       cards: {
-        totalApprovedPOs: orders.length, // frontend already using this key
+        totalApprovedPOs: orders.length,
         totalPOs: orders.length,
         approvedPOs,
         notApprovedPOs,
@@ -629,38 +637,53 @@ export const getApprovedPurchaseOrders = async (req, res) => {
         notProcessedOrDelayed,
         totalPOValue: formatMoney(totalValue),
       },
-      rows: orders.map((order) => ({
-        _id: order._id,
-        poNo: order.poNo,
+      rows: orders.map((order) => {
+        const statusLogs = Array.isArray(order.statusLogs)
+          ? order.statusLogs
+          : [];
 
-        vendorCompany: order.vendorName || order.companyName,
-        vendorName: order.vendorName || "",
-        companyName: order.companyName,
+        const latestLog =
+          statusLogs.length > 0 ? statusLogs[statusLogs.length - 1] : null;
 
-        poDate: order.poDate,
-        poValue: order.poValue,
+        return {
+          _id: order._id,
+          poNo: order.poNo,
 
-        isApproved: order.isApproved,
-        approvedBy: order.approvedBy,
-        approvedDate: order.approvedDate,
-        approvalRemarks: order.approvalRemarks || "",
+          vendorCompany: order.vendorName || order.companyName,
+          vendorName: order.vendorName || "",
+          companyName: order.companyName,
 
-        processingStatus: order.processingStatus || "Pending",
-        processedBy: order.processedBy,
-        processedDate: order.processedDate,
-        processingRemarks: order.processingRemarks || "",
+          poDate: order.poDate,
+          poValue: order.poValue,
 
-        expectedDeliveryDate: order.expectedDeliveryDate,
-        deliveryDate: order.deliveryDate,
+          isApproved: order.isApproved,
+          approvedBy: order.approvedBy,
+          approvedDate: order.approvedDate,
+          approvalRemarks: order.approvalRemarks || "",
 
-        trackingStatus: order.trackingStatus,
-        trackingRemarks: order.trackingRemarks || "",
+          activityStatus: order.activityStatus || "Not Ordered",
+          processingStatus: order.processingStatus || "Pending",
+          processedBy: order.processedBy,
+          processedDate: order.processedDate,
+          processingRemarks: order.processingRemarks || "",
 
-        remarks: order.remarks || "",
-        category: order.category,
-        status: order.status,
-        createdBy: order.createdBy,
-      })),
+          expectedDeliveryDate: order.expectedDeliveryDate,
+          deliveryDate: order.deliveryDate,
+          paymentReceivedDate: order.paymentReceivedDate,
+
+          trackingStatus: order.trackingStatus,
+          trackingRemarks: order.trackingRemarks || "",
+
+          remarks: order.remarks || "",
+          latestRemark: latestLog?.remark || order.remarks || "",
+          statusLogs,
+          category: order.category,
+          status: order.status,
+          createdBy: order.createdBy,
+          createdAt: order.createdAt,
+          updatedAt: order.updatedAt,
+        };
+      }),
     });
   } catch (error) {
     return res.status(500).json({
@@ -696,11 +719,18 @@ export const getMyDailyActivityOrders = async (req, res) => {
     const orders = await PurchaseOrder.find(filter)
       .populate("createdBy", "name email designation role subRole")
       .populate("approvedBy", "name email designation role subRole")
+      .populate("statusLogs.updatedBy", "name email designation role subRole")
       .sort({ poDate: -1 });
 
     const rows = orders
       .map((order) => {
         const delayInfo = getDelayInfo(order);
+        const statusLogs = Array.isArray(order.statusLogs)
+          ? order.statusLogs
+          : [];
+
+        const latestLog =
+          statusLogs.length > 0 ? statusLogs[statusLogs.length - 1] : null;
 
         return {
           _id: order._id,
@@ -719,6 +749,8 @@ export const getMyDailyActivityOrders = async (req, res) => {
           approvalRemarks: order.approvalRemarks || "",
           activityStatus: order.activityStatus || "Not Ordered",
           remarks: order.remarks || "",
+          latestRemark: latestLog?.remark || order.remarks || "",
+          statusLogs,
           createdBy: order.createdBy,
           delayStatus: delayInfo.delayStatus,
           delayDays: delayInfo.delayDays,
@@ -732,18 +764,20 @@ export const getMyDailyActivityOrders = async (req, res) => {
 
     const totalPOReceived = rows.length;
 
-    const completed = rows.filter(
-      (order) =>
-        order.activityStatus === "Material Received" ||
-        order.activityStatus === "Invoiced"
+    const completed = rows.filter((order) =>
+      ["Material Received", "Invoiced", "Delivered", "Payment Received", "Completed"].includes(
+        order.activityStatus
+      )
     ).length;
 
-    const inProgress = rows.filter(
-      (order) => order.activityStatus === "Ordered"
+    const inProgress = rows.filter((order) =>
+      ["Ordered", "Approved", "Processed", "In Transit"].includes(
+        order.activityStatus
+      )
     ).length;
 
     const delayed = rows.filter(
-      (order) => order.delayType === "delayed"
+      (order) => order.delayType === "delayed" || order.activityStatus === "Delayed"
     ).length;
 
     const notOrdered = rows.filter(
@@ -772,49 +806,180 @@ export const getMyDailyActivityOrders = async (req, res) => {
 
 export const updateMyDailyActivityOrder = async (req, res) => {
   try {
-    const { activityStatus, deliveryDate, remarks } = req.body;
+    const { activityStatus, deliveryDate, paymentReceivedDate, remarks } =
+      req.body;
 
     const allowedStatuses = [
       "Not Ordered",
       "Ordered",
       "Material Received",
       "Invoiced",
+      "Approved",
+      "Processed",
+      "In Transit",
+      "Delivered",
+      "Payment Received",
+      "Delayed",
+      "Completed",
     ];
 
-    if (activityStatus && !allowedStatuses.includes(activityStatus)) {
+    if (!activityStatus) {
+      return res.status(400).json({
+        success: false,
+        message: "Activity status is required",
+      });
+    }
+
+    if (!allowedStatuses.includes(activityStatus)) {
       return res.status(400).json({
         success: false,
         message: "Invalid activity status",
       });
     }
 
-    const updateData = {};
+    const cleanRemark = remarks?.trim();
 
-    if (activityStatus) updateData.activityStatus = activityStatus;
+    if (!cleanRemark) {
+      return res.status(400).json({
+        success: false,
+        message: "Remark is required for status update",
+      });
+    }
+
+    const order = await PurchaseOrder.findOne({
+      _id: req.params.id,
+      category: "Trading",
+      isApproved: true,
+    });
+
+    if (!order) {
+      return res.status(404).json({
+        success: false,
+        message: "Approved trading purchase order not found",
+      });
+    }
+
+    const oldStatus = order.activityStatus || "Not Ordered";
+
+    const updateData = {
+      activityStatus,
+      remarks: cleanRemark,
+    };
+
+    if (activityStatus === "Not Ordered") {
+      updateData.status = "Approved";
+      updateData.trackingStatus = "Approved";
+      updateData.processingStatus = "Pending";
+    }
+
+    if (activityStatus === "Approved") {
+      updateData.status = "Approved";
+      updateData.trackingStatus = "Approved";
+    }
+
+    if (activityStatus === "Ordered") {
+      updateData.status = "In Progress";
+      updateData.trackingStatus = "Processed";
+      updateData.processingStatus = "Processed";
+      updateData.processedBy = getUserId(req);
+      updateData.processedDate = new Date();
+    }
+
+    if (activityStatus === "Processed") {
+      updateData.status = "In Progress";
+      updateData.trackingStatus = "Processed";
+      updateData.processingStatus = "Processed";
+      updateData.processedBy = getUserId(req);
+      updateData.processedDate = new Date();
+    }
+
+    if (activityStatus === "In Transit") {
+      updateData.status = "In Progress";
+      updateData.trackingStatus = "In Transit";
+      updateData.processingStatus = "Processed";
+    }
+
+    if (activityStatus === "Material Received") {
+      updateData.status = "In Progress";
+      updateData.trackingStatus = "Delivered";
+      updateData.processingStatus = "Processed";
+      updateData.deliveryDate = deliveryDate || new Date();
+    }
+
+    if (activityStatus === "Delivered") {
+      updateData.status = "In Progress";
+      updateData.trackingStatus = "Delivered";
+      updateData.processingStatus = "Processed";
+      updateData.deliveryDate = deliveryDate || new Date();
+    }
+
+    if (activityStatus === "Invoiced") {
+      updateData.status = "In Progress";
+      updateData.trackingStatus = "Invoiced";
+      updateData.processingStatus = "Processed";
+    }
+
+    if (activityStatus === "Payment Received") {
+      updateData.status = "Completed";
+      updateData.trackingStatus = "Payment Received";
+      updateData.processingStatus = "Processed";
+      updateData.paymentReceivedDate = paymentReceivedDate || new Date();
+    }
+
+    if (activityStatus === "Delayed") {
+      updateData.status = "In Progress";
+      updateData.trackingStatus = "Delayed";
+      updateData.processingStatus = "Delayed";
+    }
+
+    if (activityStatus === "Completed") {
+      updateData.status = "Completed";
+      updateData.trackingStatus = "Payment Received";
+      updateData.processingStatus = "Processed";
+      updateData.paymentReceivedDate = paymentReceivedDate || new Date();
+    }
 
     if (deliveryDate !== undefined) {
       updateData.deliveryDate = deliveryDate || null;
     }
 
-    if (remarks !== undefined) updateData.remarks = remarks;
-
-    const order = await PurchaseOrder.findByIdAndUpdate(
-      req.params.id,
-      updateData,
-      { new: true }
-    );
-
-    if (!order) {
-      return res.status(404).json({
-        success: false,
-        message: "Purchase order not found",
-      });
+    if (paymentReceivedDate !== undefined) {
+      updateData.paymentReceivedDate = paymentReceivedDate || null;
     }
+
+    const userName =
+      req.user?.name || req.user?.username || req.user?.email || "Unknown User";
+
+    const userRole =
+      req.user?.designation || req.user?.subRole || req.user?.role || "";
+
+    const updatedOrder = await PurchaseOrder.findByIdAndUpdate(
+      req.params.id,
+      {
+        $set: updateData,
+        $push: {
+          statusLogs: {
+            oldStatus,
+            newStatus: activityStatus,
+            remark: cleanRemark,
+            updatedBy: getUserId(req),
+            updatedByName: userName,
+            updatedByRole: userRole,
+            updatedAt: new Date(),
+          },
+        },
+      },
+      { new: true, runValidators: true }
+    )
+      .populate("createdBy", "name email designation role subRole")
+      .populate("approvedBy", "name email designation role subRole")
+      .populate("processedBy", "name email designation role subRole")
+      .populate("statusLogs.updatedBy", "name email designation role subRole");
 
     return res.status(200).json({
       success: true,
       message: "Activity updated successfully",
-      order,
+      order: updatedOrder,
     });
   } catch (error) {
     return res.status(500).json({
@@ -1094,28 +1259,31 @@ export const getPurchasePlanningTrackingOrders = async (req, res) => {
         { poNo: { $regex: search, $options: "i" } },
         { companyName: { $regex: search, $options: "i" } },
         { vendorName: { $regex: search, $options: "i" } },
+        { status: { $regex: search, $options: "i" } },
+        { activityStatus: { $regex: search, $options: "i" } },
+        { trackingStatus: { $regex: search, $options: "i" } },
+        { processingStatus: { $regex: search, $options: "i" } },
       ];
     }
 
     const orders = await PurchaseOrder.find(filter)
-      .populate("approvedBy", "name email designation")
-      .populate("createdBy", "name email designation")
+      .populate("approvedBy", "name email designation role subRole")
+      .populate("processedBy", "name email designation role subRole")
+      .populate("createdBy", "name email designation role subRole")
+      .populate("statusLogs.updatedBy", "name email designation role subRole")
       .sort({ poDate: -1 });
 
     const totalTradingPOs = orders.length;
-
     const approvedPOs = orders.filter((order) => order.isApproved).length;
-
     const notApprovedPOs = orders.filter((order) => !order.isApproved).length;
+    const pendingPOs = orders.filter(
+      (order) => order.status === "Pending" || !order.isApproved
+    ).length;
 
     const totalPOValue = orders.reduce(
       (sum, order) => sum + Number(order.poValue || 0),
       0
     );
-
-    const pendingPOs = orders.filter(
-      (order) => order.status === "Pending" || !order.isApproved
-    ).length;
 
     return res.status(200).json({
       success: true,
@@ -1126,26 +1294,62 @@ export const getPurchasePlanningTrackingOrders = async (req, res) => {
         pendingPOs,
         totalPOValue: formatMoney(totalPOValue),
       },
-      rows: orders.map((order) => ({
-        _id: order._id,
-        poNo: order.poNo,
-        vendorCompany: order.vendorName || order.companyName,
-        vendorName: order.vendorName || "",
-        companyName: order.companyName,
-        category: order.category,
-        poDate: order.poDate,
-        poValue: order.poValue,
-        status: order.status,
-        isApproved: order.isApproved,
-        approvedBy: order.approvedBy,
-        approvedDate: order.approvedDate,
-        approvalRemarks: order.approvalRemarks || "",
-        expectedDeliveryDate: order.expectedDeliveryDate,
-        deliveryDate: order.deliveryDate,
-        trackingStatus: order.trackingStatus,
-        processingStatus: order.processingStatus,
-        createdBy: order.createdBy,
-      })),
+      rows: orders.map((order) => {
+        const statusLogs = Array.isArray(order.statusLogs)
+          ? order.statusLogs
+          : [];
+
+        const latestLog =
+          statusLogs.length > 0 ? statusLogs[statusLogs.length - 1] : null;
+
+        return {
+          _id: order._id,
+
+          poNo: order.poNo,
+          companyName: order.companyName,
+          vendorCompany: order.vendorName || order.companyName,
+          vendorName: order.vendorName || "",
+          category: order.category,
+
+          poValue: order.poValue,
+          formattedPOValue: formatMoney(order.poValue),
+
+          poDate: order.poDate,
+          expectedDeliveryDate: order.expectedDeliveryDate,
+          deliveryDate: order.deliveryDate,
+          paymentReceivedDate: order.paymentReceivedDate,
+
+          // Real PO statuses
+          status: order.status,
+          activityStatus: order.activityStatus,
+          trackingStatus: order.trackingStatus,
+          processingStatus: order.processingStatus,
+          currentStatus:
+            order.trackingStatus ||
+            order.activityStatus ||
+            order.processingStatus ||
+            order.status,
+
+          isApproved: order.isApproved,
+          approvedBy: order.approvedBy,
+          approvedDate: order.approvedDate,
+          approvalRemarks: order.approvalRemarks || "",
+
+          processedBy: order.processedBy,
+          processedDate: order.processedDate,
+          processingRemarks: order.processingRemarks || "",
+
+          trackingRemarks: order.trackingRemarks || "",
+          remarks: order.remarks || "",
+          latestRemark: latestLog?.remark || order.remarks || "",
+
+          createdBy: order.createdBy,
+          statusLogs,
+
+          createdAt: order.createdAt,
+          updatedAt: order.updatedAt,
+        };
+      }),
     });
   } catch (error) {
     return res.status(500).json({
@@ -1220,14 +1424,67 @@ export const updatePurchasePlanningApproval = async (req, res) => {
   }
 };
 
+const normalizePOAction = (value) => {
+  const key = String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/&/g, "and")
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "");
+
+  const aliases = {
+    approve: "approve",
+    approved: "approve",
+    reject: "reject",
+    rejected: "reject",
+    not_approved: "reject",
+    not_started: "not_started",
+    not_ordered: "not_started",
+    pending: "not_started",
+    in_progress: "in_progress",
+    process: "processed",
+    processed: "processed",
+    ordered: "processed",
+    in_transit: "processed",
+    material_received: "delivered",
+    delay: "delayed",
+    delayed: "delayed",
+    not_processed: "not_processed",
+    invoice: "invoiced",
+    invoiced: "invoiced",
+    delivered: "delivered",
+    completed: "completed",
+    payment_received: "payment_received",
+    completed_and_payment_received: "payment_received",
+    project_completed_and_payment_received: "payment_received",
+  };
+
+  return aliases[key] || key;
+};
 
 export const updatePOActionStatus = async (req, res) => {
   try {
-    const { action, remarks } = req.body;
+    const {
+      action: requestedAction,
+      status,
+      activityStatus,
+      processingStatus,
+      remarks,
+    } = req.body;
+
+    const action = normalizePOAction(
+      requestedAction || status || activityStatus || processingStatus
+    );
 
     const allowedActions = [
       "approve",
       "reject",
+      "not_started",
+      "in_progress",
+      "processed",
+      "delay",
+      "delayed",
+      "not_processed",
       "invoiced",
       "delivered",
       "completed",
@@ -1237,11 +1494,13 @@ export const updatePOActionStatus = async (req, res) => {
     if (!action || !allowedActions.includes(action)) {
       return res.status(400).json({
         success: false,
-        message: "Invalid action",
+        message: `Invalid action${requestedAction ? `: ${requestedAction}` : ""}`,
       });
     }
 
-    if (!remarks || !remarks.trim()) {
+    const cleanRemarks = remarks?.trim();
+
+    if (!cleanRemarks) {
       return res.status(400).json({
         success: false,
         message: "Remarks are required",
@@ -1258,6 +1517,27 @@ export const updatePOActionStatus = async (req, res) => {
     }
 
     const updateData = {};
+    const oldStatus =
+      order.activityStatus ||
+      order.processingStatus ||
+      order.trackingStatus ||
+      order.status ||
+      "";
+
+    const actionLabels = {
+      approve: "Approved",
+      reject: "Not Approved",
+      not_started: "Not Started",
+      in_progress: "In Progress",
+      processed: "Processed",
+      delay: "Delayed",
+      delayed: "Delayed",
+      not_processed: "Not Processed",
+      invoiced: "Invoiced",
+      delivered: "Delivered",
+      completed: "Completed",
+      payment_received: "Completed & Payment Received",
+    };
 
     if (action === "approve") {
       updateData.isApproved = true;
@@ -1265,7 +1545,8 @@ export const updatePOActionStatus = async (req, res) => {
       updateData.trackingStatus = "Approved";
       updateData.approvedBy = getUserId(req);
       updateData.approvedDate = new Date();
-      updateData.approvalRemarks = remarks.trim();
+      updateData.approvalRemarks = cleanRemarks;
+      updateData.remarks = cleanRemarks;
     }
 
     if (action === "reject") {
@@ -1277,9 +1558,68 @@ export const updatePOActionStatus = async (req, res) => {
       updateData.approvedDate = null;
       updateData.processedBy = null;
       updateData.processedDate = null;
-      updateData.approvalRemarks = remarks.trim();
+      updateData.approvalRemarks = cleanRemarks;
       updateData.processingRemarks = "";
       updateData.activityStatus = "Not Ordered";
+      updateData.remarks = cleanRemarks;
+    }
+
+    if (action === "not_started" || action === "not_processed") {
+      if (!order.isApproved) {
+        return res.status(400).json({
+          success: false,
+          message: "Only approved purchase orders can be updated",
+        });
+      }
+
+      updateData.activityStatus = "Not Ordered";
+      updateData.trackingStatus = "Approved";
+      updateData.processingStatus =
+        action === "not_processed" ? "Not Processed" : "Pending";
+      updateData.status = "Approved";
+      updateData.processedBy = null;
+      updateData.processedDate = null;
+      updateData.processingRemarks = cleanRemarks;
+      updateData.trackingRemarks = cleanRemarks;
+      updateData.remarks = cleanRemarks;
+    }
+
+    if (action === "in_progress" || action === "processed") {
+      if (!order.isApproved) {
+        return res.status(400).json({
+          success: false,
+          message: "Only approved purchase orders can be processed",
+        });
+      }
+
+      updateData.activityStatus = "Processed";
+      updateData.trackingStatus = "Processed";
+      updateData.processingStatus = "Processed";
+      updateData.status = "In Progress";
+      updateData.processedBy = getUserId(req);
+      updateData.processedDate = new Date();
+      updateData.processingRemarks = cleanRemarks;
+      updateData.trackingRemarks = cleanRemarks;
+      updateData.remarks = cleanRemarks;
+    }
+
+    if (action === "delay" || action === "delayed") {
+      if (!order.isApproved) {
+        return res.status(400).json({
+          success: false,
+          message: "Only approved purchase orders can be delayed",
+        });
+      }
+
+      updateData.activityStatus = "Delayed";
+      updateData.trackingStatus = "Delayed";
+      updateData.processingStatus = "Delayed";
+      updateData.status = "In Progress";
+      updateData.processedBy = getUserId(req);
+      updateData.processedDate = new Date();
+      updateData.processingRemarks = cleanRemarks;
+      updateData.trackingRemarks = cleanRemarks;
+      updateData.remarks = cleanRemarks;
     }
 
     if (action === "invoiced") {
@@ -1296,8 +1636,9 @@ export const updatePOActionStatus = async (req, res) => {
       updateData.status = "In Progress";
       updateData.processedBy = getUserId(req);
       updateData.processedDate = new Date();
-      updateData.processingRemarks = remarks.trim();
-      updateData.trackingRemarks = remarks.trim();
+      updateData.processingRemarks = cleanRemarks;
+      updateData.trackingRemarks = cleanRemarks;
+      updateData.remarks = cleanRemarks;
     }
 
     if (action === "delivered") {
@@ -1315,8 +1656,9 @@ export const updatePOActionStatus = async (req, res) => {
       updateData.status = "In Progress";
       updateData.processedBy = getUserId(req);
       updateData.processedDate = new Date();
-      updateData.processingRemarks = remarks.trim();
-      updateData.trackingRemarks = remarks.trim();
+      updateData.processingRemarks = cleanRemarks;
+      updateData.trackingRemarks = cleanRemarks;
+      updateData.remarks = cleanRemarks;
     }
 
     if (action === "completed") {
@@ -1329,11 +1671,13 @@ export const updatePOActionStatus = async (req, res) => {
 
       updateData.status = "Completed";
       updateData.trackingStatus = "Delivered";
+      updateData.activityStatus = "Completed";
       updateData.processingStatus = "Processed";
       updateData.processedBy = getUserId(req);
       updateData.processedDate = new Date();
-      updateData.processingRemarks = remarks.trim();
-      updateData.trackingRemarks = remarks.trim();
+      updateData.processingRemarks = cleanRemarks;
+      updateData.trackingRemarks = cleanRemarks;
+      updateData.remarks = cleanRemarks;
     }
 
     if (action === "payment_received") {
@@ -1346,22 +1690,44 @@ export const updatePOActionStatus = async (req, res) => {
 
       updateData.status = "Completed";
       updateData.trackingStatus = "Payment Received";
+      updateData.activityStatus = "Payment Received";
       updateData.processingStatus = "Processed";
       updateData.paymentReceivedDate = new Date();
       updateData.processedBy = getUserId(req);
       updateData.processedDate = new Date();
-      updateData.processingRemarks = remarks.trim();
-      updateData.trackingRemarks = remarks.trim();
+      updateData.processingRemarks = cleanRemarks;
+      updateData.trackingRemarks = cleanRemarks;
+      updateData.remarks = cleanRemarks;
     }
+
+    const userName =
+      req.user?.name || req.user?.username || req.user?.email || "Unknown User";
+
+    const userRole =
+      req.user?.designation || req.user?.subRole || req.user?.role || "";
 
     const updatedOrder = await PurchaseOrder.findByIdAndUpdate(
       req.params.id,
-      updateData,
-      { new: true }
+      {
+        $set: updateData,
+        $push: {
+          statusLogs: {
+            oldStatus,
+            newStatus: actionLabels[action] || action,
+            remark: cleanRemarks,
+            updatedBy: getUserId(req),
+            updatedByName: userName,
+            updatedByRole: userRole,
+            updatedAt: new Date(),
+          },
+        },
+      },
+      { new: true, runValidators: true }
     )
-      .populate("approvedBy", "name email designation")
-      .populate("processedBy", "name email designation")
-      .populate("createdBy", "name email designation");
+      .populate("approvedBy", "name email designation role subRole")
+      .populate("processedBy", "name email designation role subRole")
+      .populate("createdBy", "name email designation role subRole")
+      .populate("statusLogs.updatedBy", "name email designation role subRole");
 
     return res.status(200).json({
       success: true,
@@ -1425,48 +1791,60 @@ export const getSalesManagerPOTrackingOrders = async (req, res) => {
       .populate("approvedBy", "name email designation role subRole")
       .populate("processedBy", "name email designation role subRole")
       .populate("createdBy", "name email designation role subRole")
+      .populate("statusLogs.updatedBy", "name email designation role subRole")
       .sort({ poDate: -1 });
 
-    const rows = orders.map((order) => ({
-      _id: order._id,
+    const rows = orders.map((order) => {
+      const statusLogs = Array.isArray(order.statusLogs)
+        ? order.statusLogs
+        : [];
 
-      poNo: order.poNo,
-      companyName: order.companyName,
-      vendorCompany: order.vendorName || order.companyName,
-      vendorName: order.vendorName || "",
-      category: order.category,
+      const latestLog =
+        statusLogs.length > 0 ? statusLogs[statusLogs.length - 1] : null;
 
-      poValue: order.poValue,
-      formattedPOValue: formatMoney(order.poValue),
+      return {
+        _id: order._id,
 
-      poDate: order.poDate,
-      expectedDeliveryDate: order.expectedDeliveryDate,
-      deliveryDate: order.deliveryDate,
+        poNo: order.poNo,
+        companyName: order.companyName,
+        vendorCompany: order.vendorName || order.companyName,
+        vendorName: order.vendorName || "",
+        category: order.category,
 
-      status: order.status,
-      isApproved: order.isApproved,
-      approvedBy: order.approvedBy,
-      approvedDate: order.approvedDate,
-      approvalRemarks: order.approvalRemarks || "",
+        poValue: order.poValue,
+        formattedPOValue: formatMoney(order.poValue),
 
-      activityStatus: order.activityStatus,
+        poDate: order.poDate,
+        expectedDeliveryDate: order.expectedDeliveryDate,
+        deliveryDate: order.deliveryDate,
 
-      processingStatus: order.processingStatus,
-      processedBy: order.processedBy,
-      processedDate: order.processedDate,
-      processingRemarks: order.processingRemarks || "",
+        status: order.status,
+        isApproved: order.isApproved,
+        approvedBy: order.approvedBy,
+        approvedDate: order.approvedDate,
+        approvalRemarks: order.approvalRemarks || "",
 
-      trackingStatus: order.trackingStatus,
-      currentStatus: order.trackingStatus || order.status,
-      trackingRemarks: order.trackingRemarks || "",
+        activityStatus: order.activityStatus,
 
-      paymentReceivedDate: order.paymentReceivedDate,
+        processingStatus: order.processingStatus,
+        processedBy: order.processedBy,
+        processedDate: order.processedDate,
+        processingRemarks: order.processingRemarks || "",
 
-      createdBy: order.createdBy,
-      remarks: order.remarks || "",
-      createdAt: order.createdAt,
-      updatedAt: order.updatedAt,
-    }));
+        trackingStatus: order.trackingStatus,
+        currentStatus: order.trackingStatus || order.status,
+        trackingRemarks: order.trackingRemarks || "",
+
+        paymentReceivedDate: order.paymentReceivedDate,
+
+        createdBy: order.createdBy,
+        remarks: order.remarks || "",
+        latestRemark: latestLog?.remark || order.remarks || "",
+        statusLogs,
+        createdAt: order.createdAt,
+        updatedAt: order.updatedAt,
+      };
+    });
 
     const totalPOValue = rows.reduce(
       (sum, order) => sum + Number(order.poValue || 0),

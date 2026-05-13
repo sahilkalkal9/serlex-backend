@@ -239,3 +239,53 @@ export const getSalesTeamUsers = async (req, res) => {
     });
   }
 };
+
+export const getPurchaseTeamUsers = async (req, res) => {
+  try {
+    const users = await User.find({
+      $or: [
+        { role: "purchase_user" },
+        { role: "subadmin", subRole: "purchase_manager" },
+      ],
+    })
+      .select("-password")
+      .sort({ createdAt: -1 });
+
+    return res.status(200).json({
+      success: true,
+      count: users.length,
+      users,
+    });
+  } catch (error) {
+    console.error("getPurchaseTeamUsers error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Server error while fetching purchase team users",
+    });
+  }
+};
+
+export const getPpcTeamUsers = async (req, res) => {
+  try {
+    const users = await User.find({
+      $or: [
+        { role: "ppc_user" },
+        { role: "subadmin", subRole: "ppc_manager" },
+      ],
+    })
+      .select("-password")
+      .sort({ createdAt: -1 });
+
+    return res.status(200).json({
+      success: true,
+      count: users.length,
+      users,
+    });
+  } catch (error) {
+    console.error("getPpcTeamUsers error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Server error while fetching PPC team users",
+    });
+  }
+};

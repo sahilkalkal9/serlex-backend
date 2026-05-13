@@ -74,7 +74,19 @@ const purchaseOrderSchema = new mongoose.Schema(
 
     activityStatus: {
       type: String,
-      enum: ["Not Ordered", "Ordered", "Material Received", "Invoiced"],
+      enum: [
+        "Not Ordered",
+        "Ordered",
+        "Material Received",
+        "Invoiced",
+        "Approved",
+        "Processed",
+        "In Transit",
+        "Delivered",
+        "Payment Received",
+        "Delayed",
+        "Completed",
+      ],
       default: "Not Ordered",
     },
 
@@ -147,6 +159,51 @@ const purchaseOrderSchema = new mongoose.Schema(
       default: "",
       trim: true,
     },
+
+    statusLogs: [
+      {
+        oldStatus: {
+          type: String,
+          default: "",
+          trim: true,
+        },
+
+        newStatus: {
+          type: String,
+          required: true,
+          trim: true,
+        },
+
+        remark: {
+          type: String,
+          required: true,
+          trim: true,
+        },
+
+        updatedBy: {
+          type: mongoose.Schema.Types.ObjectId,
+          ref: "User",
+          default: null,
+        },
+
+        updatedByName: {
+          type: String,
+          default: "",
+          trim: true,
+        },
+
+        updatedByRole: {
+          type: String,
+          default: "",
+          trim: true,
+        },
+
+        updatedAt: {
+          type: Date,
+          default: Date.now,
+        },
+      },
+    ],
   },
   { timestamps: true }
 );

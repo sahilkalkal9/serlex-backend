@@ -20,11 +20,26 @@ const router = express.Router();
 
 const purchaseManagerAccess = ["admin", "subadmin", "superadmin"];
 
-// Team members
+const purchaseTeamAccess = [
+  "admin",
+  "subadmin",
+  "superadmin",
+  "purchase_user",
+];
+
+// Team members - for manager panel
 router.get(
   "/members",
   protect,
   authorizeRoles(purchaseManagerAccess),
+  getPurchaseTeamMembers
+);
+
+// Team members - for planning create meeting dropdown
+router.get(
+  "/purchase-team",
+  protect,
+  authorizeRoles(purchaseTeamAccess),
   getPurchaseTeamMembers
 );
 
@@ -64,4 +79,4 @@ router.patch(
   updatePurchaseMeetingApproval
 );
 
-export default router;  
+export default router;
