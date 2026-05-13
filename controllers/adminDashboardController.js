@@ -1,4 +1,5 @@
 import Activity from "../models/Activity.js";
+import bcrypt from "bcryptjs";
 import Meeting from "../models/Meeting.js";
 import PurchaseOrder from "../models/PurchaseOrder.js";
 import User from "../models/User.js";
@@ -131,8 +132,10 @@ export const getAdminDashboard = async (req, res) => {
 
 export const getAdminUsers = async (req, res) => {
   try {
-    const users = await User.find({ status: { $ne: "inactive" } })
-      .select("name email employeeId mobileNumber department designation role subRole status")
+    const query =
+      req.query.includeInactive === "true" ? {} : { status: { $ne: "inactive" } };
+    const users = await User.find(query)
+      .select("name email employeeId mobileNumber department designation managerName territory joiningDate dob username role subRole status")
       .sort({ name: 1 })
       .lean();
 
@@ -146,6 +149,183 @@ export const getAdminUsers = async (req, res) => {
     return res.status(500).json({
       success: false,
       message: error.message || "Failed to load users",
+    });
+  }
+};
+
+export const createAdminUser = async (req, res) => {
+  try {
+    const {
+      name,
+      email,
+      employeeId,
+      mobileNumber,
+      department,
+      designation,
+      managerName,
+      territory,
+      joiningDate,
+      username,
+      dob,
+      role,
+      subRole,
+      pin,
+      status,
+    } = req.body;
+
+    if (
+      !name ||
+      !email ||
+      !employeeId ||
+      !mobileNumber ||
+      !department ||
+      !designation ||
+      !joiningDate ||
+      !username ||
+      !dob ||
+      !role ||
+      !pin
+    ) {
+      return res.status(400).json({
+        success: false,
+        message: "All required fields are mandatory",
+      });
+    }
+
+    const allowedRoles = ["admin", "subadmin", "sales_user", "purchase_user", "ppc_user"];
+    const allowedSubRoles = [
+      "",
+      "sales_manager",
+      "po_manager",
+      "ppc_manager",
+      "hr_manager",
+      "accounts_manager",
+      "operations_manager",
+    ];
+
+    if (!allowedRoles.includes(role)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid role selected",
+      });
+    }
+
+    if (role === "subadmin" && !subRole) {
+      return res.status(400).json({
+        success: false,
+        message: "Manager role is required",
+      });
+    }
+
+    if (subRole && !allowedSubRoles.includes(subRole)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid manager role selected",
+      });
+    }
+
+    if (String(pin).length < 4) {
+      return res.status(400).json({
+        success: false,
+        message: "PIN must be at least 4 characters",
+      });
+    }
+
+    const existingUser = await User.findOne({
+      $or: [
+        { email: email.trim().toLowerCase() },
+        { employeeId: employeeId.trim() },
+        { username: username.trim() },
+      ],
+    });
+
+    if (existingUser) {
+      return res.status(400).json({
+        success: false,
+        message: "User already exists with this email, employee ID, or username",
+      });
+    }
+
+    const hashedDefaultPassword = await bcrypt.hash("123456", 10);
+    const hashedPin = await bcrypt.hash(String(pin), 10);
+
+    const user = await User.create({
+      name: name.trim(),
+      email: email.trim().toLowerCase(),
+      employeeId: employeeId.trim(),
+      mobileNumber: mobileNumber.trim(),
+      department: department.trim(),
+      designation: designation.trim(),
+      managerName: managerName?.trim() || "",
+      territory: territory?.trim() || "",
+      joiningDate,
+      username: username.trim(),
+      dob,
+      password: hashedDefaultPassword,
+      role,
+      subRole: role === "subadmin" ? subRole : "",
+      status: status || "approved",
+      pin: hashedPin,
+    });
+
+    const safeUser = await User.findById(user._id)
+      .select("name email employeeId mobileNumber department designation managerName territory joiningDate dob username role subRole status")
+      .lean();
+
+    return res.status(201).json({
+      success: true,
+      message: "Person added successfully",
+      user: safeUser,
+    });
+  } catch (error) {
+    console.error("createAdminUser error:", error);
+    return res.status(500).json({
+      success: false,
+      message: error.message || "Failed to add person",
+    });
+  }
+};
+
+export const updateAdminUserStatus = async (req, res) => {
+  try {
+    const { status } = req.body;
+    const allowedStatuses = ["pending", "approved", "inactive"];
+
+    if (!allowedStatuses.includes(status)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid user status",
+      });
+    }
+
+    const user = await User.findByIdAndUpdate(
+      req.params.id,
+      { status },
+      {
+        new: true,
+        runValidators: true,
+      }
+    )
+      .select("name email employeeId mobileNumber department designation role subRole status")
+      .lean();
+
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: "User not found",
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: "User status updated successfully",
+      user,
+    });
+  } catch (error) {
+    console.error("updateAdminUserStatus error:", error);
+    return res.status(500).json({
+      success: false,
+      message: error.message || "Failed to update user status",
     });
   }
 };
@@ -176,6 +356,59 @@ export const getAdminMeetings = async (req, res) => {
     return res.status(500).json({
       success: false,
       message: error.message || "Failed to load meetings",
+    });
+  }
+};
+
+
+export const getAdminHierarchy = async (req, res) => {
+  try {
+    const users = await User.find({ status: { $ne: "inactive" } })
+      .select(
+        "name email employeeId mobileNumber department designation managerName territory role subRole status"
+      )
+      .sort({ name: 1 })
+      .lean();
+
+    const admins = users.filter((u) =>
+      ["admin", "superadmin"].includes(u.role)
+    );
+
+    const managers = users.filter((u) => u.role === "subadmin");
+
+    const normalUsers = users.filter((u) =>
+      ["sales_user", "purchase_user", "ppc_user"].includes(u.role)
+    );
+
+    const managerToUserRole = {
+      sales_manager: "sales_user",
+      po_manager: "purchase_user",
+      purchase_manager: "purchase_user",
+      ppc_manager: "ppc_user",
+    };
+
+    const tree = admins.map((admin) => ({
+      ...admin,
+      type: "admin",
+      children: managers.map((manager) => ({
+        ...manager,
+        type: "manager",
+        children: normalUsers.filter(
+          (user) => user.role === managerToUserRole[manager.subRole]
+        ),
+      })),
+    }));
+
+    return res.status(200).json({
+      success: true,
+      count: users.length,
+      tree,
+    });
+  } catch (error) {
+    console.error("getAdminHierarchy error:", error);
+    return res.status(500).json({
+      success: false,
+      message: error.message || "Failed to load hierarchy",
     });
   }
 };

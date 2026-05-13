@@ -35,7 +35,7 @@ const allowedOrigins = [
   "https://serlex-main-frontend.vercel.app",
   "https://serlex-sales-frontend.vercel.app",
   "https://serlex-purchase-frontend.vercel.app",
-  "https://serlex-admin-frontend.vercel.app"
+  "https://serlex-admin-frontend.vercel.app",
 ];
 
 app.use(
