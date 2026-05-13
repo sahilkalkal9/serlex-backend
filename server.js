@@ -16,6 +16,7 @@ import vendorRoutes from "./routes/vendorRoutes.js";
 import purchaseTeamRoutes from "./routes/purchaseTeamRoutes.js";
 import ppcTeamRoutes from "./routes/ppcTeamRoutes.js";
 import salesTargetRoutes from "./routes/salesTargetRoutes.js";                                                                                                                                                                                                                                                                          
+import adminRoutes from "./routes/adminRoutes.js";
 
 
 dotenv.config();
@@ -26,12 +27,15 @@ const PORT = process.env.PORT || 5000;
 const allowedOrigins = [
   "http://localhost:3000",
   "http://localhost:3001",
+  "http://localhost:3002",
+  "http://localhost:3003",
   "https://your-frontend-domain.com",
   "https://crm.techvrm.com",
   "https://serlex-frontend.vercel.app",
   "https://serlex-main-frontend.vercel.app",
   "https://serlex-sales-frontend.vercel.app",
-  "https://serlex-purchase-frontend.vercel.app"
+  "https://serlex-purchase-frontend.vercel.app",
+  "https://serlex-admin-frontend.vercel.app"
 ];
 
 app.use(
@@ -76,6 +80,7 @@ app.use("/api/vendors", vendorRoutes);
 app.use("/api/purchase-team", purchaseTeamRoutes);
 app.use("/api/ppc-team", ppcTeamRoutes);
 app.use("/api/sales-targets", salesTargetRoutes);
+app.use("/api/admin", adminRoutes);
 
 
 
