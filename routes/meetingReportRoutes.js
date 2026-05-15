@@ -3,7 +3,10 @@ import { protect } from "../middlewares/authMiddleware.js";
 import {
   createMeetingReport,
   getMeetingReports,
+  getMeetingReportByMeetingId,
+  getReportsByLeadId,
   getEligibleMeetingsForReport,
+  getLeadIds,
   updateMeetingReport,
 } from "../controllers/meetingReportController.js";
 
@@ -25,7 +28,10 @@ const allowMeetingReportWriteAccess = (req, res, next) => {
 };
 
 router.get("/", protect, getMeetingReports);
+router.get("/by-meeting/:meetingId", protect, getMeetingReportByMeetingId);
+router.get("/by-lead/:leadId", protect, getReportsByLeadId);
 router.get("/eligible-meetings", protect, getEligibleMeetingsForReport);
+router.get("/lead-ids", protect, getLeadIds);
 
 router.post("/", protect, allowMeetingReportWriteAccess, createMeetingReport);
 

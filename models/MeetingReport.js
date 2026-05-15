@@ -37,10 +37,19 @@ const meetingReportSchema = new mongoose.Schema(
     },
     leadStatus: {
       type: String,
-      enum: ["hot", "warm", "cold"],
+      enum: ["hot", "warm", "cold", "converted", "lead_closed"],
       required: function () {
         return this.reportType === "client";
       },
+    },
+    poReceived: {
+      type: Boolean,
+      default: false,
+    },
+    leadClosedRemark: {
+      type: String,
+      default: "",
+      trim: true,
     },
     meetingDateTime: {
       type: Date,

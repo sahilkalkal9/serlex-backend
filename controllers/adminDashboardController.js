@@ -286,6 +286,89 @@ export const createAdminUser = async (req, res) => {
   }
 };
 
+export const getAdminHierarchy = async (req, res) => {
+  try {
+    const users = await User.find({ status: { $ne: "inactive" } })
+      .select("name email employeeId mobileNumber department designation managerName territory role subRole status")
+      .sort({ role: 1, name: 1 })
+      .lean();
+
+    const admins = users.filter((user) => user.role === "admin" || user.role === "superadmin");
+    const managers = users.filter((user) => user.role === "subadmin");
+    const teamUsers = users.filter((user) => !["admin", "superadmin", "subadmin"].includes(user.role));
+
+    const fallbackAdmin = admins[0] || {
+      _id: "admin-root",
+      name: "Admin",
+      email: "",
+      employeeId: "",
+      mobileNumber: "",
+      department: "Administration",
+      designation: "Administrator",
+      role: "admin",
+      subRole: "",
+      status: "approved",
+    };
+
+    const normalize = (user) => ({
+      ...user,
+      id: String(user._id || user.id),
+      children: [],
+    });
+
+    const managerNodes = managers.map((manager) => {
+      const managerName = (manager.name || "").toLowerCase();
+      const department = manager.department || "";
+      const subRoleDepartment = manager.subRole?.includes("sales")
+        ? "Sales"
+        : manager.subRole?.includes("po")
+        ? "Purchase"
+        : manager.subRole?.includes("ppc")
+        ? "PPC"
+        : "";
+
+      return {
+        ...normalize(manager),
+        children: teamUsers
+          .filter((member) => {
+            const memberManager = (member.managerName || "").toLowerCase();
+            return (
+              (memberManager && memberManager === managerName) ||
+              (department && member.department === department) ||
+              (subRoleDepartment && member.department === subRoleDepartment)
+            );
+          })
+          .map(normalize),
+      };
+    });
+
+    const assignedUserIds = new Set(
+      managerNodes.flatMap((manager) => manager.children.map((member) => String(member._id || member.id)))
+    );
+    const unassignedUsers = teamUsers
+      .filter((member) => !assignedUserIds.has(String(member._id)))
+      .map(normalize);
+
+    const tree = admins.length
+      ? admins.map((admin, index) => ({
+          ...normalize(admin),
+          children: index === 0 ? [...managerNodes, ...unassignedUsers] : [],
+        }))
+      : [{ ...normalize(fallbackAdmin), children: [...managerNodes, ...unassignedUsers] }];
+
+    return res.status(200).json({
+      success: true,
+      tree,
+    });
+  } catch (error) {
+    console.error("getAdminHierarchy error:", error);
+    return res.status(500).json({
+      success: false,
+      message: error.message || "Failed to load hierarchy",
+    });
+  }
+};
+
 export const updateAdminUserStatus = async (req, res) => {
   try {
     const { status } = req.body;
@@ -361,54 +444,54 @@ export const getAdminMeetings = async (req, res) => {
 };
 
 
-export const getAdminHierarchy = async (req, res) => {
-  try {
-    const users = await User.find({ status: { $ne: "inactive" } })
-      .select(
-        "name email employeeId mobileNumber department designation managerName territory role subRole status"
-      )
-      .sort({ name: 1 })
-      .lean();
+// export const getAdminHierarchy = async (req, res) => {
+//   try {
+//     const users = await User.find({ status: { $ne: "inactive" } })
+//       .select(
+//         "name email employeeId mobileNumber department designation managerName territory role subRole status"
+//       )
+//       .sort({ name: 1 })
+//       .lean();
 
-    const admins = users.filter((u) =>
-      ["admin", "superadmin"].includes(u.role)
-    );
+//     const admins = users.filter((u) =>
+//       ["admin", "superadmin"].includes(u.role)
+//     );
 
-    const managers = users.filter((u) => u.role === "subadmin");
+//     const managers = users.filter((u) => u.role === "subadmin");
 
-    const normalUsers = users.filter((u) =>
-      ["sales_user", "purchase_user", "ppc_user"].includes(u.role)
-    );
+//     const normalUsers = users.filter((u) =>
+//       ["sales_user", "purchase_user", "ppc_user"].includes(u.role)
+//     );
 
-    const managerToUserRole = {
-      sales_manager: "sales_user",
-      po_manager: "purchase_user",
-      purchase_manager: "purchase_user",
-      ppc_manager: "ppc_user",
-    };
+//     const managerToUserRole = {
+//       sales_manager: "sales_user",
+//       po_manager: "purchase_user",
+//       purchase_manager: "purchase_user",
+//       ppc_manager: "ppc_user",
+//     };
 
-    const tree = admins.map((admin) => ({
-      ...admin,
-      type: "admin",
-      children: managers.map((manager) => ({
-        ...manager,
-        type: "manager",
-        children: normalUsers.filter(
-          (user) => user.role === managerToUserRole[manager.subRole]
-        ),
-      })),
-    }));
+//     const tree = admins.map((admin) => ({
+//       ...admin,
+//       type: "admin",
+//       children: managers.map((manager) => ({
+//         ...manager,
+//         type: "manager",
+//         children: normalUsers.filter(
+//           (user) => user.role === managerToUserRole[manager.subRole]
+//         ),
+//       })),
+//     }));
 
-    return res.status(200).json({
-      success: true,
-      count: users.length,
-      tree,
-    });
-  } catch (error) {
-    console.error("getAdminHierarchy error:", error);
-    return res.status(500).json({
-      success: false,
-      message: error.message || "Failed to load hierarchy",
-    });
-  }
-};
+//     return res.status(200).json({
+//       success: true,
+//       count: users.length,
+//       tree,
+//     });
+//   } catch (error) {
+//     console.error("getAdminHierarchy error:", error);
+//     return res.status(500).json({
+//       success: false,
+//       message: error.message || "Failed to load hierarchy",
+//     });
+//   }
+// };

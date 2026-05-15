@@ -54,6 +54,8 @@ export const createMeetingReport = async (req, res) => {
       leadStatus,
       expectedDealValue,
       notes,
+      poReceived,
+      leadClosedRemark,
     } = req.body;
 
     if (!meetingId) {
@@ -134,7 +136,7 @@ export const createMeetingReport = async (req, res) => {
         });
       }
 
-      if (!["hot", "warm", "cold"].includes(leadStatus)) {
+      if (!["hot", "warm", "cold", "converted", "lead_closed"].includes(leadStatus)) {
         return res.status(400).json({
           success: false,
           message: "Invalid lead status",
@@ -145,37 +147,7 @@ export const createMeetingReport = async (req, res) => {
     let purchaseOrder = null;
 
     if (reportType === "client" && purchaseOrderNumber?.trim()) {
-      const finalPoNo = purchaseOrderNumber.trim();
-
-      const existingPurchaseOrder = await PurchaseOrder.findOne({
-        poNo: finalPoNo,
-      });
-
-      if (existingPurchaseOrder) {
-        return res.status(400).json({
-          success: false,
-          message: "Purchase order already exists with this PO number",
-        });
-      }
-
-      purchaseOrder = await PurchaseOrder.create({
-        poNo: finalPoNo,
-        companyName: companyName?.trim(),
-        category: category || "Trading",
-        poValue: Number(expectedDealValue || 0),
-        poDate: poDate || new Date(),
-        expectedDeliveryDate: poExpectedDeliveryDate || null,
-        deliveryDate: null,
-        status: "Pending",
-
-        // Important for sales target achievement calculation
-        createdBy: getUserId(req),
-
-        // Defaults for tracking flow
-        trackingStatus: "Not Approved",
-        activityStatus: "Not Ordered",
-        processingStatus: "Pending",
-      });
+      // PO number is stored on the report, no auto-creation of PurchaseOrder document
     }
 
     const reportPayload =
@@ -201,6 +173,8 @@ export const createMeetingReport = async (req, res) => {
             paymentTerms: "",
             purchaseOrderNumber: "",
             purchaseOrder: null,
+            poReceived: false,
+            leadClosedRemark: "",
           }
         : {
             meeting: meetingId,
@@ -222,7 +196,9 @@ export const createMeetingReport = async (req, res) => {
             leadStatus,
             expectedDealValue: Number(expectedDealValue || 0),
             notes: notes || "",
-            purchaseOrder: purchaseOrder?._id || null,
+            purchaseOrder: null,
+            poReceived: poReceived || false,
+            leadClosedRemark: leadClosedRemark || "",
           };
 
     const report = await MeetingReport.create(reportPayload);
@@ -293,6 +269,64 @@ export const getMeetingReports = async (req, res) => {
   }
 };
 
+export const getMeetingReportByMeetingId = async (req, res) => {
+  try {
+    const { meetingId } = req.params;
+
+    const report = await getReportPopulateQuery(
+      MeetingReport.findOne({ meeting: meetingId })
+    );
+
+    if (!report) {
+      return res.status(404).json({
+        success: false,
+        message: "Report not found for this meeting",
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      report,
+    });
+  } catch (error) {
+    console.error("getMeetingReportByMeetingId error:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: error.message || "Failed to fetch meeting report",
+    });
+  }
+};
+
+export const getReportsByLeadId = async (req, res) => {
+  try {
+    const { leadId } = req.params;
+
+    if (!leadId?.trim()) {
+      return res.status(400).json({
+        success: false,
+        message: "Lead ID is required",
+      });
+    }
+
+    const reports = await getReportPopulateQuery(
+      MeetingReport.find({ leadId: leadId.trim() })
+    ).sort({ createdAt: -1 });
+
+    return res.status(200).json({
+      success: true,
+      reports,
+    });
+  } catch (error) {
+    console.error("getReportsByLeadId error:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: error.message || "Failed to fetch reports",
+    });
+  }
+};
+
 export const getEligibleMeetingsForReport = async (req, res) => {
   try {
     const completedMeetings = await Meeting.find({
@@ -301,7 +335,7 @@ export const getEligibleMeetingsForReport = async (req, res) => {
       hasReport: false,
     })
       .select(
-        "title personName companyName location startTime endTime status meetingType attendees"
+        "title personName companyName location startTime endTime status meetingType attendees leadId"
       )
       .sort({ startTime: -1 });
 
@@ -315,6 +349,59 @@ export const getEligibleMeetingsForReport = async (req, res) => {
     return res.status(500).json({
       success: false,
       message: error.message || "Failed to fetch eligible meetings",
+    });
+  }
+};
+
+export const getLeadIds = async (req, res) => {
+  try {
+    const reports = await MeetingReport.aggregate([
+      {
+        $match: {
+          leadId: { $ne: "", $exists: true },
+        },
+      },
+      {
+        $sort: { createdAt: -1 },
+      },
+      {
+        $group: {
+          _id: "$leadId",
+          leadId: { $first: "$leadId" },
+          companyName: { $first: "$companyName" },
+          contactPerson: { $first: "$contactPerson" },
+          latestStatus: { $first: "$leadStatus" },
+          latestReportId: { $first: "$_id" },
+        },
+      },
+      {
+        $match: {
+          latestStatus: { $nin: ["converted", "lead_closed"] },
+        },
+      },
+      {
+        $project: {
+          _id: 0,
+          leadId: 1,
+          companyName: 1,
+          contactPerson: 1,
+        },
+      },
+      {
+        $sort: { leadId: 1 },
+      },
+    ]);
+
+    return res.status(200).json({
+      success: true,
+      leadIds: reports,
+    });
+  } catch (error) {
+    console.error("getLeadIds error:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: error.message || "Failed to fetch lead IDs",
     });
   }
 };

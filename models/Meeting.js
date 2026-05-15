@@ -79,8 +79,24 @@ const meetingSchema = new mongoose.Schema(
     },
     status: {
       type: String,
-      enum: ["upcoming", "completed", "cancelled"],
+      enum: ["upcoming", "ongoing", "completed", "cancelled"],
       default: "upcoming",
+    },
+    startLocation: {
+      type: {
+        lat: { type: Number },
+        lng: { type: Number },
+        name: { type: String, default: "" },
+      },
+      default: null,
+    },
+    endLocation: {
+      type: {
+        lat: { type: Number },
+        lng: { type: Number },
+        name: { type: String, default: "" },
+      },
+      default: null,
     },
     hasReport: {
       type: Boolean,
@@ -137,6 +153,23 @@ const meetingSchema = new mongoose.Schema(
     },
 
     cancellationRemark: {
+      type: String,
+      default: "",
+      trim: true,
+    },
+
+    isFollowUp: {
+      type: Boolean,
+      default: false,
+    },
+
+    leadId: {
+      type: String,
+      default: "",
+      trim: true,
+    },
+
+    followUpRemark: {
       type: String,
       default: "",
       trim: true,

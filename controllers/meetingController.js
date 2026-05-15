@@ -1,5 +1,6 @@
 import { google } from "googleapis";
 import Meeting from "../models/Meeting.js";
+import Lead from "../models/Lead.js";
 import User from "../models/User.js";
 import { getAuthorizedOAuthClient } from "../utils/googleClient.js";
 
@@ -40,13 +41,13 @@ export const getMeetings = async (req, res) => {
 
     const query = { createdBy: req.user.id };
 
-    if (status && ["upcoming", "completed", "cancelled"].includes(status)) {
+    if (status && ["upcoming", "ongoing", "completed", "cancelled"].includes(status)) {
       query.status = status;
     }
 
     const meetings = await populateMeetingQuery(
       Meeting.find(query)
-    ).sort({ startTime: 1 });
+    ).sort({ _id: -1 });
 
     return res.status(200).json({
       success: true,
@@ -130,6 +131,8 @@ export const createMeeting = async (req, res) => {
       avatarUrl = "",
       status = "upcoming",
       meetingType = "client",
+      isFollowUp = false,
+      leadId = "",
     } = req.body;
 
     if (!title?.trim()) {
@@ -209,7 +212,34 @@ export const createMeeting = async (req, res) => {
       status,
       approvalStatus: "pending",
       meetingType,
+      isFollowUp,
     });
+
+    let generatedLeadId = leadId;
+
+    if (meetingType === "client" && !isFollowUp) {
+      generatedLeadId = `STLNO-${String(meeting._id).slice(-3).toUpperCase()}`;
+
+      await Lead.create({
+        leadId: generatedLeadId,
+        meetingId: meeting._id,
+        companyName: companyName || "",
+        contactPerson: personName || "",
+      });
+
+      meeting.leadId = generatedLeadId;
+      await meeting.save();
+    }
+
+    if (isFollowUp && leadId) {
+      meeting.leadId = leadId;
+      await meeting.save();
+
+      await Lead.findOneAndUpdate(
+        { leadId },
+        { $push: { followUps: meeting._id } }
+      );
+    }
 
     return res.status(201).json({
       success: true,
@@ -229,9 +259,10 @@ export const createMeeting = async (req, res) => {
 export const updateMeetingStatus = async (req, res) => {
   try {
     const { id } = req.params;
-    const { status, cancellationRemark = "" } = req.body;
+    const { status, cancellationRemark = "", startLocation, endLocation } =
+      req.body;
 
-    if (!["upcoming", "completed", "cancelled"].includes(status)) {
+    if (!["upcoming", "ongoing", "completed", "cancelled"].includes(status)) {
       return res.status(400).json({
         success: false,
         message: "Invalid status",
@@ -297,6 +328,14 @@ export const updateMeetingStatus = async (req, res) => {
     if (status === "cancelled") {
       meeting.cancellationRemark = cancellationRemark.trim();
       meeting.cancelledBy = req.user.id;
+    }
+
+    if (status === "ongoing" && startLocation) {
+      meeting.startLocation = startLocation;
+    }
+
+    if (status === "completed" && endLocation) {
+      meeting.endLocation = endLocation;
     }
 
     await meeting.save();
@@ -504,6 +543,8 @@ export const createMeetingForSalesUser = async (req, res) => {
       avatarUrl = "",
       status = "upcoming",
       meetingType = "client",
+      isFollowUp = false,
+      leadId = "",
     } = req.body;
 
     if (!salesUserId) {
@@ -588,7 +629,34 @@ export const createMeetingForSalesUser = async (req, res) => {
       status,
       approvalStatus: "pending",
       meetingType,
+      isFollowUp,
     });
+
+    let generatedLeadId = leadId;
+
+    if (meetingType === "client" && !isFollowUp) {
+      generatedLeadId = `STLNO-${String(meeting._id).slice(-3).toUpperCase()}`;
+
+      await Lead.create({
+        leadId: generatedLeadId,
+        meetingId: meeting._id,
+        companyName: companyName || "",
+        contactPerson: personName || "",
+      });
+
+      meeting.leadId = generatedLeadId;
+      await meeting.save();
+    }
+
+    if (isFollowUp && leadId) {
+      meeting.leadId = leadId;
+      await meeting.save();
+
+      await Lead.findOneAndUpdate(
+        { leadId },
+        { $push: { followUps: meeting._id } }
+      );
+    }
 
     return res.status(201).json({
       success: true,
@@ -736,29 +804,13 @@ export const getPpcMeetings = async (req, res) => {
       query.approvalStatus = approvalStatus;
     }
 
-    if (fromDate || toDate) {
-      query.startTime = {};
-
-      if (fromDate) {
-        query.startTime.$gte = new Date(`${fromDate}T00:00:00.000Z`);
-      }
-
-      if (toDate) {
-        query.startTime.$lte = new Date(`${toDate}T23:59:59.999Z`);
-      }
-    }
-
-    if (search.trim()) {
-      query.$and = [
-        {
-          $or: [
-            { title: { $regex: search.trim(), $options: "i" } },
-            { personName: { $regex: search.trim(), $options: "i" } },
-            { companyName: { $regex: search.trim(), $options: "i" } },
-            { location: { $regex: search.trim(), $options: "i" } },
-            { description: { $regex: search.trim(), $options: "i" } },
-          ],
-        },
+    if (search) {
+      query.$or = [
+        { title: { $regex: search, $options: "i" } },
+        { personName: { $regex: search, $options: "i" } },
+        { companyName: { $regex: search, $options: "i" } },
+        { location: { $regex: search, $options: "i" } },
+        ...(query.$or || []),
       ];
     }
 
@@ -768,7 +820,6 @@ export const getPpcMeetings = async (req, res) => {
 
     return res.status(200).json({
       success: true,
-      count: meetings.length,
       meetings,
     });
   } catch (error) {
@@ -780,3 +831,29 @@ export const getPpcMeetings = async (req, res) => {
     });
   }
 };
+
+export const getCompletedLeads = async (req, res) => {
+  try {
+    const meetings = await Meeting.find({
+      createdBy: req.user.id,
+      status: "completed",
+      meetingType: "client",
+      leadId: { $ne: "", $exists: true },
+    })
+      .select("leadId companyName personName title startTime")
+      .sort({ _id: -1 });
+
+    return res.status(200).json({
+      success: true,
+      meetings,
+    });
+  } catch (error) {
+    console.error("getCompletedLeads error:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: error.message || "Failed to fetch completed leads",
+    });
+  }
+};
+
