@@ -2,6 +2,7 @@ import Meeting from "../models/Meeting.js";
 import MeetingReport from "../models/MeetingReport.js";
 import PurchaseOrder from "../models/PurchaseOrder.js";
 import User from "../models/User.js";
+import Lead from "../models/Lead.js";
 
 const isAdminUser = (user) => {
   return ["admin", "superadmin"].includes(user?.role);
@@ -31,15 +32,41 @@ const getReportPopulateQuery = (query) => {
     );
 };
 
+const buildReportPayload = (reqBody) => { return reqBody; };
+
+const clientLeadStatuses = ["hot", "warm", "cold", "converted", "lead_closed"];
+
+const toLeadModelStatus = (leadStatus = "") => {
+  if (leadStatus === "converted") return "converted";
+  if (leadStatus === "lead_closed") return "closed";
+  return "active";
+};
+
+const syncLeadFromReport = async ({
+  leadId,
+  companyName,
+  contactPerson,
+  leadStatus,
+}) => {
+  if (!leadId?.trim()) return;
+
+  await Lead.findOneAndUpdate(
+    { leadId: leadId.trim() },
+    {
+      $set: {
+        companyName: companyName || "",
+        contactPerson: contactPerson || "",
+        status: toLeadModelStatus(leadStatus),
+      },
+    }
+  );
+};
+
 export const createMeetingReport = async (req, res) => {
   try {
     const {
       meetingId,
-
-      // Team report field
       meetingPoints,
-
-      // Client report fields
       leadId,
       purchaseOrderNumber,
       companyName,
@@ -65,27 +92,11 @@ export const createMeetingReport = async (req, res) => {
       });
     }
 
-    const meeting = await Meeting.findOne({
-      _id: meetingId,
-      createdBy: getUserId(req),
-      status: "completed",
-    });
-
+    const meeting = await Meeting.findById(meetingId);
     if (!meeting) {
       return res.status(404).json({
         success: false,
-        message: "Completed meeting not found",
-      });
-    }
-
-    const existingReport = await MeetingReport.findOne({
-      meeting: meetingId,
-    });
-
-    if (existingReport) {
-      return res.status(400).json({
-        success: false,
-        message: "Report already added for this meeting",
+        message: "Meeting not found",
       });
     }
 
@@ -95,48 +106,29 @@ export const createMeetingReport = async (req, res) => {
       if (!meetingPoints?.trim()) {
         return res.status(400).json({
           success: false,
-          message: "Meeting points are required for team meeting report",
+          message: "Meeting points are required",
         });
       }
-    }
-
-    if (reportType === "client") {
+    } else {
       if (!companyName?.trim()) {
         return res.status(400).json({
           success: false,
           message: "Company name is required",
         });
       }
-
       if (!contactPerson?.trim()) {
         return res.status(400).json({
           success: false,
           message: "Contact person is required",
         });
       }
-
       if (!phoneNumber?.trim()) {
         return res.status(400).json({
           success: false,
           message: "Phone number is required",
         });
       }
-
-      if (!meetingDateTime) {
-        return res.status(400).json({
-          success: false,
-          message: "Meeting date and time is required",
-        });
-      }
-
-      if (!leadStatus) {
-        return res.status(400).json({
-          success: false,
-          message: "Lead status is required",
-        });
-      }
-
-      if (!["hot", "warm", "cold", "converted", "lead_closed"].includes(leadStatus)) {
+      if (leadStatus && !clientLeadStatuses.includes(leadStatus)) {
         return res.status(400).json({
           success: false,
           message: "Invalid lead status",
@@ -144,68 +136,67 @@ export const createMeetingReport = async (req, res) => {
       }
     }
 
+    const reportPayload = {
+      meeting: meetingId,
+      createdBy: getUserId(req),
+      reportType,
+    };
+
     let purchaseOrder = null;
 
-    if (reportType === "client" && purchaseOrderNumber?.trim()) {
-      // PO number is stored on the report, no auto-creation of PurchaseOrder document
+    if (reportType === "team") {
+      reportPayload.meetingPoints = meetingPoints.trim();
+      reportPayload.notes = notes || "";
+    } else {
+      reportPayload.leadId = leadId || "";
+      reportPayload.companyName = companyName.trim();
+      reportPayload.contactPerson = contactPerson.trim();
+      reportPayload.phoneNumber = phoneNumber.trim();
+      reportPayload.meetingDateTime = meetingDateTime;
+      reportPayload.meetingPurpose = meetingPurpose || "";
+      reportPayload.category = category || "";
+      reportPayload.paymentTerms = paymentTerms || "";
+      reportPayload.leadStatus = leadStatus || "warm";
+      reportPayload.expectedDealValue = Number(expectedDealValue || 0);
+      reportPayload.notes = notes || "";
+      reportPayload.poReceived = poReceived || false;
+      reportPayload.leadClosedRemark = leadClosedRemark || "";
+      reportPayload.purchaseOrderNumber = purchaseOrderNumber || "";
+      reportPayload.poDate = poDate || null;
+      reportPayload.poExpectedDeliveryDate = poExpectedDeliveryDate || null;
+
+      if (poReceived) {
+        if (!purchaseOrderNumber?.trim()) {
+          return res.status(400).json({
+            success: false,
+            message: "Purchase order number is required",
+          });
+        }
+        purchaseOrder = await PurchaseOrder.create({
+          poNo: purchaseOrderNumber.trim(),
+          companyName: companyName.trim(),
+          category: category || "Trading",
+          poValue: Number(expectedDealValue || 0),
+          poDate,
+          expectedDeliveryDate: poExpectedDeliveryDate || null,
+          createdBy: getUserId(req),
+        });
+        reportPayload.purchaseOrder = purchaseOrder._id;
+      }
     }
-
-    const reportPayload =
-      reportType === "team"
-        ? {
-            meeting: meetingId,
-            createdBy: getUserId(req),
-            reportType: "team",
-            meetingPoints: meetingPoints.trim(),
-
-            companyName: meeting.companyName || "Team Meeting",
-            contactPerson: meeting.personName || "Team",
-            phoneNumber: "",
-            meetingDateTime: meeting.startTime || new Date(),
-            meetingPurpose: meeting.title || "Team Meeting",
-            leadStatus: undefined,
-            expectedDealValue: 0,
-            notes: notes || "",
-            leadId: "",
-            poDate: null,
-            poExpectedDeliveryDate: null,
-            category: "",
-            paymentTerms: "",
-            purchaseOrderNumber: "",
-            purchaseOrder: null,
-            poReceived: false,
-            leadClosedRemark: "",
-          }
-        : {
-            meeting: meetingId,
-            createdBy: getUserId(req),
-            reportType: "client",
-            meetingPoints: "",
-
-            leadId: leadId || "",
-            purchaseOrderNumber: purchaseOrderNumber || "",
-            companyName: companyName?.trim(),
-            contactPerson: contactPerson?.trim(),
-            phoneNumber: phoneNumber?.trim(),
-            meetingDateTime,
-            poDate: poDate || null,
-            poExpectedDeliveryDate: poExpectedDeliveryDate || null,
-            meetingPurpose: meetingPurpose || "",
-            category: category || "",
-            paymentTerms: paymentTerms || "",
-            leadStatus,
-            expectedDealValue: Number(expectedDealValue || 0),
-            notes: notes || "",
-            purchaseOrder: null,
-            poReceived: poReceived || false,
-            leadClosedRemark: leadClosedRemark || "",
-          };
 
     const report = await MeetingReport.create(reportPayload);
 
-    await Meeting.findByIdAndUpdate(meetingId, {
-      hasReport: true,
-    });
+    await Meeting.findByIdAndUpdate(meetingId, { hasReport: true });
+
+    if (reportType === "client") {
+      await syncLeadFromReport({
+        leadId: reportPayload.leadId,
+        companyName: reportPayload.companyName,
+        contactPerson: reportPayload.contactPerson,
+        leadStatus: reportPayload.leadStatus,
+      });
+    }
 
     const populatedReport = await getReportPopulateQuery(
       MeetingReport.findById(report._id)
@@ -217,17 +208,36 @@ export const createMeetingReport = async (req, res) => {
         reportType === "team"
           ? "Team meeting report added successfully"
           : purchaseOrder
-          ? "Meeting report and purchase order added successfully"
-          : "Meeting report added successfully",
+            ? "Meeting report and purchase order added successfully"
+            : "Meeting report added successfully",
       report: populatedReport,
       purchaseOrder,
     });
   } catch (error) {
     console.error("createMeetingReport error:", error);
-
     return res.status(500).json({
       success: false,
       message: error.message || "Failed to create meeting report",
+    });
+  }
+};
+
+export const checkMissingReports = async (req, res) => {
+  try {
+    const count = await Meeting.countDocuments({
+      createdBy: getUserId(req),
+      status: "completed",
+      hasReport: false,
+    });
+    return res.status(200).json({
+      success: true,
+      missingCount: count,
+    });
+  } catch (error) {
+    console.error("checkMissingReports error:", error);
+    return res.status(500).json({
+      success: false,
+      message: error.message || "Failed to check missing reports",
     });
   }
 };
@@ -481,7 +491,7 @@ export const updateMeetingReport = async (req, res) => {
         });
       }
 
-      if (leadStatus && !["hot", "warm", "cold"].includes(leadStatus)) {
+      if (leadStatus && !clientLeadStatuses.includes(leadStatus)) {
         return res.status(400).json({
           success: false,
           message: "Invalid lead status",
@@ -511,6 +521,13 @@ export const updateMeetingReport = async (req, res) => {
     }
 
     await report.save();
+
+    await syncLeadFromReport({
+      leadId: report.leadId,
+      companyName: report.companyName,
+      contactPerson: report.contactPerson,
+      leadStatus: report.leadStatus,
+    });
 
     const updatedReport = await getReportPopulateQuery(
       MeetingReport.findById(report._id)

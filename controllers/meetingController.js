@@ -65,14 +65,22 @@ export const getMeetings = async (req, res) => {
 
 export const getSalesUsersMeetings = async (req, res) => {
   try {
-    const { status, approvalStatus, search = "" } = req.query;
+    const { status, approvalStatus, search = "", scope } = req.query;
 
     const salesUsers = await User.find({ role: "sales_user" }).select("_id");
     const salesUserIds = salesUsers.map((user) => user._id);
 
     const query = {
-      createdBy: { $in: salesUserIds },
+      $or: [
+        { createdBy: { $in: salesUserIds } },
+        { createdBy: req.user.id },
+      ],
     };
+
+    if (scope === "mine") {
+      delete query.$or;
+      query.createdBy = req.user.id;
+    }
 
     if (status && ["upcoming", "completed", "cancelled"].includes(status)) {
       query.status = status;
@@ -841,11 +849,19 @@ export const getCompletedLeads = async (req, res) => {
       leadId: { $ne: "", $exists: true },
     })
       .select("leadId companyName personName title startTime")
-      .sort({ _id: -1 });
+      .sort({ _id: -1 })
+      .lean();
+
+    const seen = new Set();
+    const uniqueMeetings = meetings.filter((m) => {
+      if (seen.has(m.leadId)) return false;
+      seen.add(m.leadId);
+      return true;
+    });
 
     return res.status(200).json({
       success: true,
-      meetings,
+      meetings: uniqueMeetings,
     });
   } catch (error) {
     console.error("getCompletedLeads error:", error);

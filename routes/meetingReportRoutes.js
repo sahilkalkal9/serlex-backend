@@ -1,6 +1,7 @@
 import express from "express";
 import { protect } from "../middlewares/authMiddleware.js";
 import {
+  checkMissingReports,
   createMeetingReport,
   getMeetingReports,
   getMeetingReportByMeetingId,
@@ -32,6 +33,7 @@ router.get("/by-meeting/:meetingId", protect, getMeetingReportByMeetingId);
 router.get("/by-lead/:leadId", protect, getReportsByLeadId);
 router.get("/eligible-meetings", protect, getEligibleMeetingsForReport);
 router.get("/lead-ids", protect, getLeadIds);
+router.get("/check-missing", protect, checkMissingReports);
 
 router.post("/", protect, allowMeetingReportWriteAccess, createMeetingReport);
 
