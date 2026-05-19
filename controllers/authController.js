@@ -92,6 +92,7 @@ export const signup = async (req, res) => {
       password: hashedPassword,
       role: role || "sales_user",
       subRole: role === "subadmin" ? subRole : "",
+      isApprovedByAdmin: false,
       pin: hashedPin,
     });
 
@@ -166,6 +167,13 @@ export const login = async (req, res) => {
       return res.status(401).json({
         success: false,
         message: "Invalid credentials",
+      });
+    }
+
+    if (!["superadmin", "admin"].includes(user.role) && !user.isApprovedByAdmin) {
+      return res.status(403).json({
+        success: false,
+        message: "Account pending admin approval. Please contact your administrator.",
       });
     }
 

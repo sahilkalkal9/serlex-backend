@@ -110,6 +110,11 @@ const userSchema = new mongoose.Schema(
       default: "pending",
     },
 
+    isApprovedByAdmin: {
+      type: Boolean,
+      default: false,
+    },
+
     pin: {
       type: String,
       trim: true,

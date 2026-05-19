@@ -1,4 +1,5 @@
 import Activity from "../models/Activity.js";
+import Lead from "../models/Lead.js";
 import Meeting from "../models/Meeting.js";
 import MeetingReport from "../models/MeetingReport.js";
 import PurchaseOrder from "../models/PurchaseOrder.js";
@@ -107,14 +108,45 @@ const buildSalesData = async (start, end, filters = {}) => {
     poQuery.createdBy = { $in: selectedIds };
   }
 
-  const [targets, purchaseOrders] = await Promise.all([
+  // Build manager -> team members mapping (by managerName field)
+  const allUsers = await User.find({ status: { $ne: "inactive" } })
+    .select("name managerName")
+    .lean();
+  const managerTeamMap = {};
+  selectedUsers.forEach((manager) => {
+    const mName = manager.name?.toLowerCase().trim();
+    if (!mName) return;
+    const members = allUsers.filter(
+      (u) => u.managerName?.toLowerCase().trim() === mName && asId(u) !== asId(manager)
+    );
+    if (members.length) {
+      managerTeamMap[asId(manager)] = members.map(asId);
+    }
+  });
+  const allTeamMemberIds = [...new Set(Object.values(managerTeamMap).flat())];
+
+  const [targets, purchaseOrders, teamTargets, teamPos] = await Promise.all([
     SalesTarget.find(targetQuery).populate("salesUser", "name department managerName").lean(),
     PurchaseOrder.find(poQuery).populate("createdBy", "name department managerName").lean(),
+    allTeamMemberIds.length
+      ? SalesTarget.find({ period: "Monthly", periodKey: { $in: periodKeys }, salesUser: { $in: allTeamMemberIds } })
+          .populate("salesUser", "name department managerName").lean()
+      : Promise.resolve([]),
+    allTeamMemberIds.length
+      ? PurchaseOrder.find({ ...dateQuery("poDate", start, end), createdBy: { $in: allTeamMemberIds } })
+          .populate("createdBy", "name department managerName").lean()
+      : Promise.resolve([]),
   ]);
 
   const monthly = monthKeys.map((key) => {
     const target = targets.filter((item) => item.periodKey === key).reduce((total, item) => total + Number(item.targetAmount || 0), 0);
     const achieved = purchaseOrders.filter((po) => monthKey(po.poDate) === key).reduce((total, po) => total + Number(po.poValue || 0), 0);
+    return { key, label: monthLabel(key), target, achieved, achievement: percent(achieved, target) };
+  });
+
+  const monthlyTeam = monthKeys.map((key) => {
+    const target = teamTargets.filter((item) => item.periodKey === key).reduce((total, item) => total + Number(item.targetAmount || 0), 0);
+    const achieved = teamPos.filter((po) => monthKey(po.poDate) === key).reduce((total, po) => total + Number(po.poValue || 0), 0);
     return { key, label: monthLabel(key), target, achieved, achievement: percent(achieved, target) };
   });
 
@@ -138,11 +170,31 @@ const buildSalesData = async (start, end, filters = {}) => {
     const userIds = users.filter((user) => user.department === department).map(asId);
     const target = targets.filter((item) => userIds.includes(asId(item.salesUser))).reduce((total, item) => total + Number(item.targetAmount || 0), 0);
     const achieved = purchaseOrders.filter((po) => userIds.includes(asId(po.createdBy))).reduce((total, po) => total + Number(po.poValue || 0), 0);
-    return { department, target, achieved, achievement: percent(achieved, target) };
+    return { department, target, achieved, achievement: percent(achieved, target), variance: Math.max(target - achieved, 0) };
   }).filter((row) => row.target || row.achieved);
+
+  // Real team rows: target given by each sales manager to their team, vs team achievement
+  const teamRows = selectedUsers.map((manager) => {
+    const id = asId(manager);
+    const memberIds = managerTeamMap[id] || [];
+    const target = teamTargets.filter((t) => memberIds.includes(asId(t.salesUser))).reduce((total, t) => total + Number(t.targetAmount || 0), 0);
+    const achieved = teamPos.filter((po) => memberIds.includes(asId(po.createdBy))).reduce((total, po) => total + Number(po.poValue || 0), 0);
+    return {
+      id,
+      name: `${userName(manager)} Team`,
+      department: manager.department || "Sales",
+      target,
+      achieved,
+      achievement: percent(achieved, target),
+      variance: Math.max(target - achieved, 0),
+    };
+  }).filter((row) => row.target > 0 || row.achieved > 0);
 
   const totalTarget = sum(managerRows, "target");
   const totalAchieved = sum(managerRows, "achieved");
+  const avgAchievementPct = monthly.filter((m) => m.target > 0).length
+    ? Math.round(monthly.filter((m) => m.target > 0).reduce((s, m) => s + m.achievement, 0) / monthly.filter((m) => m.target > 0).length)
+    : 0;
 
   return {
     options: await getOptions(),
@@ -151,23 +203,21 @@ const buildSalesData = async (start, end, filters = {}) => {
       totalAchieved,
       variance: Math.max(totalTarget - totalAchieved, 0),
       achievementPercent: percent(totalAchieved, totalTarget),
-      avgMonthlyAchievement: monthly.length ? Math.round(totalAchieved / monthly.length) : 0,
+      avgMonthlyAchievement: avgAchievementPct,
+      totalManagers: managerRows.length,
+      achievedManagers: managerRows.filter((r) => r.status === "Achieved").length,
     },
     monthly,
+    monthlyTeam,
     quarterly: [0, 1, 2, 3].map((index) => {
       const slice = monthly.slice(index * 3, index * 3 + 3);
+      if (!slice.length) return null;
       const target = sum(slice, "target");
       const achieved = sum(slice, "achieved");
       return { label: `Q${index + 1}`, target, achieved, achievement: percent(achieved, target) };
-    }),
+    }).filter(Boolean),
     managerRows,
-    teamRows: managerRows.map((row) => ({
-      ...row,
-      target: Math.round(row.target * 0.82),
-      achieved: Math.round(row.achieved * 0.78),
-      achievement: percent(Math.round(row.achieved * 0.78), Math.round(row.target * 0.82)),
-      variance: Math.max(Math.round(row.target * 0.82) - Math.round(row.achieved * 0.78), 0),
-    })),
+    teamRows,
     departmentRows,
   };
 };
@@ -270,6 +320,12 @@ export const getAdminLoginLogoutReport = async (req, res) => {
         activeHoursValue: Math.round(userDuration / 3600000),
         avgSessionDuration: formatHours(rows.length ? userDuration / rows.length : 0),
         activeUsers: rows.length ? 1 : 0,
+        activities: rows.map((a) => ({
+          loginTime: a.loginTime,
+          logoutTime: a.logoutTime,
+          loginLocation: a.loginLocation,
+          logoutLocation: a.logoutLocation,
+        })),
       };
     }).filter((row) => row.totalLogins || row.totalLogouts);
 
@@ -294,6 +350,21 @@ export const getAdminLoginLogoutReport = async (req, res) => {
       { label: "After 3 PM", match: (hour) => hour >= 15 },
     ];
 
+    const allLoginTimes = activities.map((a) => new Date(a.loginTime)).filter(Boolean).sort((a, b) => a - b);
+    const firstLoginTime = allLoginTimes.length ? allLoginTimes[0] : null;
+    const lastLoginTime = allLoginTimes.length ? allLoginTimes[allLoginTimes.length - 1] : null;
+
+    const locationMap = {};
+    activities.forEach((a) => {
+      const name = a.loginLocation?.name || "Unknown";
+      if (!locationMap[name]) locationMap[name] = 0;
+      locationMap[name]++;
+    });
+    const totalWithLocation = activities.length;
+    const locationRows = Object.entries(locationMap)
+      .map(([label, count]) => ({ label, count, share: percent(count, totalWithLocation) }))
+      .sort((a, b) => b.count - a.count);
+
     return res.json({
       success: true,
       options,
@@ -304,6 +375,8 @@ export const getAdminLoginLogoutReport = async (req, res) => {
         activeUsers: uniqueUsers,
         avgSessionDuration: formatHours(avgSessionMs),
         loginSuccessRate: percent(totalLogouts, totalLogins),
+        firstLoginTime,
+        lastLoginTime,
       },
       daily: daySeries,
       topUsers: userRows.sort((a, b) => b.activeHoursValue - a.activeHoursValue).slice(0, 5),
@@ -318,12 +391,7 @@ export const getAdminLoginLogoutReport = async (req, res) => {
         { label: "Mobile", share: 21.35 },
         { label: "Tablet", share: 6.24 },
       ],
-      locationRows: [
-        { label: "Office - Headquarter", share: 65.42 },
-        { label: "Office - Branch 1", share: 18.73 },
-        { label: "Work From Home", share: 12.82 },
-        { label: "Office - Branch 2", share: 3.03 },
-      ],
+      locationRows,
     });
   } catch (error) {
     console.error("getAdminLoginLogoutReport error:", error);
@@ -339,60 +407,166 @@ export const getAdminMeetingAnalyticsReport = async (req, res) => {
       .populate("createdBy", "name department designation")
       .lean();
     const totalMeetings = meetings.length;
-    const clientMeetings = meetings.filter((meeting) => meeting.meetingType === "client").length;
-    const teamMeetings = meetings.filter((meeting) => meeting.meetingType === "team").length;
-    const totalDurationMs = meetings.reduce((total, meeting) => total + Math.max(new Date(meeting.endTime) - new Date(meeting.startTime), 0), 0);
+    const clientMeetings = meetings.filter((m) => m.meetingType === "client").length;
+    const teamMeetings = meetings.filter((m) => m.meetingType === "team").length;
+    const totalDurationMs = meetings.reduce((t, m) => t + Math.max(new Date(m.endTime) - new Date(m.startTime), 0), 0);
     const monthKeys = getMonthKeys(start, end);
+    const upcoming = meetings.filter((m) => m.status === "upcoming" || m.status === "ongoing").length;
+
     const monthly = monthKeys.map((key) => {
-      const rows = meetings.filter((meeting) => monthKey(meeting.startTime) === key);
-      const sales = rows.filter((meeting) => meeting.meetingType === "team").length;
-      const client = rows.filter((meeting) => meeting.meetingType === "client").length;
-      return { label: monthLabel(key), sales, client, total: rows.length };
+      const rows = meetings.filter((m) => monthKey(m.startTime) === key);
+      const team = rows.filter((m) => m.meetingType === "team").length;
+      const client = rows.filter((m) => m.meetingType === "client").length;
+      const completed = rows.filter((m) => m.status === "completed").length;
+      const cancelled = rows.filter((m) => m.status === "cancelled").length;
+      return { label: monthLabel(key), team, client, total: rows.length, completed, cancelled };
     });
+
     const departmentRows = options.departments.map((department) => {
-      const rows = meetings.filter((meeting) => meeting.createdBy?.department === department);
-      return { department, meetings: rows.length, share: percent(rows.length, totalMeetings) };
+      const rows = meetings.filter((m) => m.createdBy?.department === department);
+      const team = rows.filter((m) => m.meetingType === "team").length;
+      const client = rows.filter((m) => m.meetingType === "client").length;
+      return { department, meetings: rows.length, team, client, share: percent(rows.length, totalMeetings) };
     }).filter((row) => row.meetings);
+
     const employeeMap = new Map();
     meetings.forEach((meeting) => {
       const id = asId(meeting.createdBy) || "unassigned";
-      const row = employeeMap.get(id) || { id, name: userName(meeting.createdBy), salesMeetings: 0, clientMeetings: 0, totalMeetings: 0 };
-      if (meeting.meetingType === "team") row.salesMeetings += 1;
+      const duration = Math.max(new Date(meeting.endTime) - new Date(meeting.startTime), 0);
+      const row = employeeMap.get(id) || {
+        id, name: userName(meeting.createdBy),
+        teamMeetings: 0, clientMeetings: 0, totalMeetings: 0, totalDurationMs: 0,
+      };
+      if (meeting.meetingType === "team") row.teamMeetings += 1;
       if (meeting.meetingType === "client") row.clientMeetings += 1;
       row.totalMeetings += 1;
+      row.totalDurationMs += duration;
       employeeMap.set(id, row);
     });
-    const employeeRows = [...employeeMap.values()].sort((a, b) => b.totalMeetings - a.totalMeetings);
+    const employeeRows = [...employeeMap.values()]
+      .map((row) => ({
+        ...row,
+        totalHours: formatHours(row.totalDurationMs),
+        avgDuration: formatHours(row.totalMeetings ? row.totalDurationMs / row.totalMeetings : 0),
+      }))
+      .sort((a, b) => b.totalMeetings - a.totalMeetings);
+
+    const teamRows = options.departments.map((department) => {
+      const rows = meetings.filter((m) => m.createdBy?.department === department);
+      const deptTeam = rows.filter((m) => m.meetingType === "team").length;
+      const deptClient = rows.filter((m) => m.meetingType === "client").length;
+      const deptDuration = rows.reduce((t, m) => t + Math.max(new Date(m.endTime) - new Date(m.startTime), 0), 0);
+      return {
+        team: `${department} Team`,
+        teamMeetings: deptTeam,
+        clientMeetings: deptClient,
+        totalMeetings: rows.length,
+        totalHours: formatHours(deptDuration),
+        avgDuration: formatHours(rows.length ? deptDuration / rows.length : 0),
+      };
+    }).filter((row) => row.totalMeetings);
+
+    const typeRows = [
+      { label: "Team Meeting", meetings: teamMeetings, share: percent(teamMeetings, totalMeetings) },
+      { label: "Client Meeting", meetings: clientMeetings, share: percent(clientMeetings, totalMeetings) },
+    ];
+
+    const statusRows = [
+      { label: "Upcoming", count: upcoming, share: percent(upcoming, totalMeetings) },
+      { label: "Completed", count: meetings.filter((m) => m.status === "completed").length, share: meetings.length ? percent(meetings.filter((m) => m.status === "completed").length, totalMeetings) : 0 },
+      { label: "Cancelled", count: meetings.filter((m) => m.status === "cancelled").length, share: meetings.length ? percent(meetings.filter((m) => m.status === "cancelled").length, totalMeetings) : 0 },
+    ];
+
+    const completedCount = meetings.filter((m) => m.status === "completed").length;
+    const cancelledCount = meetings.filter((m) => m.status === "cancelled").length;
+
+    const leads = await Lead.find(dateQuery("createdAt", start, end))
+      .populate("meetingId", "title startTime endTime createdBy")
+      .populate("followUps", "title startTime endTime status meetingType createdBy")
+      .sort({ createdAt: -1 })
+      .lean();
+
+    const leadIds = leads.map((l) => l.leadId).filter(Boolean);
+    const allMeetingIds = leads.flatMap((l) => [l.meetingId?._id, ...(l.followUps || []).map((f) => f._id)]).filter(Boolean);
+    const leadReports = await MeetingReport.find({ leadId: { $in: leadIds } })
+      .populate("createdBy", "name")
+      .populate("meeting", "title startTime endTime")
+      .sort({ meetingDateTime: -1 })
+      .lean();
+
+    const reportsByLeadId = {};
+    leadReports.forEach((r) => {
+      const id = r.leadId;
+      if (!reportsByLeadId[id]) reportsByLeadId[id] = [];
+      reportsByLeadId[id].push(r);
+    });
+
+    const leadRows = leads.map((l) => {
+      const reports = reportsByLeadId[l.leadId] || [];
+      const latestReport = reports[0] || null;
+      const followUpMeetings = (l.followUps || []).map((f) => ({
+        _id: f._id,
+        title: f.title,
+        startTime: f.startTime,
+        endTime: f.endTime,
+        status: f.status,
+        meetingType: f.meetingType,
+        createdBy: userName(f.createdBy),
+      }));
+      return {
+        _id: l._id,
+        leadId: l.leadId,
+        companyName: l.companyName || "-",
+        contactPerson: l.contactPerson || "-",
+        status: l.status,
+        originalMeetingTitle: l.meetingId?.title || "N/A",
+        originalMeetingDate: l.meetingId?.startTime,
+        followUpCount: followUpMeetings.length,
+        followUpMeetings,
+        reports: reports.map((r) => ({
+          _id: r._id,
+          meetingTitle: r.meeting?.title || "N/A",
+          meetingDate: r.meeting?.startTime,
+          reportType: r.reportType,
+          leadStatus: r.leadStatus || "-",
+          expectedDealValue: r.expectedDealValue || 0,
+          meetingPurpose: r.meetingPurpose || "-",
+          meetingPoints: r.meetingPoints || "-",
+          notes: r.notes || "-",
+          createdBy: userName(r.createdBy),
+          poReceived: r.poReceived,
+          purchaseOrderNumber: r.purchaseOrderNumber || "-",
+        })),
+        latestLeadStatus: latestReport?.leadStatus || "-",
+        latestDealValue: latestReport?.expectedDealValue || 0,
+      };
+    });
 
     return res.json({
       success: true,
       options,
       summary: {
         totalMeetings,
-        salesMeetings: teamMeetings,
+        teamMeetings,
         clientMeetings,
         totalMeetingHours: formatHours(totalDurationMs),
         avgMeetingDuration: formatHours(totalMeetings ? totalDurationMs / totalMeetings : 0),
-        scheduled: meetings.filter((meeting) => meeting.status !== "cancelled").length,
-        completed: meetings.filter((meeting) => meeting.status === "completed").length,
-        cancelled: meetings.filter((meeting) => meeting.status === "cancelled").length,
-        rescheduled: meetings.filter((meeting) => meeting.source === "google").length,
+        scheduled: totalMeetings - cancelledCount,
+        completed: completedCount,
+        cancelled: cancelledCount,
+        upcoming,
+        completionRate: percent(completedCount, totalMeetings - cancelledCount || totalMeetings),
+        totalLeads: leads.length,
+        activeLeads: leads.filter((l) => l.status === "active").length,
+        convertedLeads: leads.filter((l) => l.status === "converted").length,
       },
       monthly,
       departmentRows,
       employeeRows,
-      teamRows: departmentRows.map((row) => ({
-        team: `${row.department} Team`,
-        salesMeetings: Math.round(row.meetings * 0.58),
-        clientMeetings: row.meetings - Math.round(row.meetings * 0.58),
-        totalMeetings: row.meetings,
-        totalHours: formatHours((totalDurationMs / Math.max(totalMeetings, 1)) * row.meetings),
-        avgDuration: formatHours(totalDurationMs / Math.max(totalMeetings, 1)),
-      })),
-      typeRows: [
-        { label: "Sales Meeting", meetings: teamMeetings, share: percent(teamMeetings, totalMeetings) },
-        { label: "Client Meeting", meetings: clientMeetings, share: percent(clientMeetings, totalMeetings) },
-      ],
+      teamRows,
+      typeRows,
+      statusRows,
+      leadRows,
     });
   } catch (error) {
     console.error("getAdminMeetingAnalyticsReport error:", error);
@@ -405,11 +579,12 @@ export const getAdminPoReport = async (req, res) => {
     const { start, end } = getDateRange(req.query.fromDate, req.query.toDate);
     const options = await getOptions();
     const query = dateQuery("poDate", start, end);
-    if (req.query.department && req.query.department !== "all") {
+    if (req.query.salesManager && req.query.salesManager !== "all") {
+      query.createdBy = req.query.salesManager;
+    } else if (req.query.department && req.query.department !== "all") {
       const ids = options.users.filter((user) => user.department === req.query.department).map((user) => user._id);
       query.createdBy = { $in: ids };
     }
-    if (req.query.salesManager && req.query.salesManager !== "all") query.createdBy = req.query.salesManager;
 
     const purchaseOrders = await PurchaseOrder.find(query).populate("createdBy", "name department managerName").lean();
     const monthKeys = getMonthKeys(start, end);
@@ -447,7 +622,7 @@ export const getAdminPoReport = async (req, res) => {
     return res.json({
       success: true,
       options,
-      summary: { received, completed, delivered, delayed, onTimeDelivery: percent(delivered - delayed, delivered) },
+      summary: { received, completed, delivered, delayed, onTimeDelivery: percent(Math.max(0, delivered - delayed), delivered) },
       monthly,
       managerRows,
       comparisonRows: managerRows.map((row) => ({
@@ -467,55 +642,198 @@ export const getAdminAttendanceReport = async (req, res) => {
   try {
     const { start, end } = getDateRange(req.query.fromDate, req.query.toDate);
     const options = await getOptions();
-    const users = options.users.filter((user) => !req.query.department || req.query.department === "all" || user.department === req.query.department);
-    const activities = await Activity.find(dateQuery("loginTime", start, end)).populate("user", "name department").lean();
-    const dayCount = Math.max(Math.ceil((end - start) / 86400000), 1);
-    const totalWorkingDays = users.length * dayCount;
-    const present = activities.length;
-    const late = activities.filter((activity) => new Date(activity.loginTime).getHours() >= 10).length;
-    const absent = Math.max(totalWorkingDays - present, 0);
-    const leaves = activities.filter((activity) => !activity.logoutTime).length;
+    let users = options.users.filter((user) => !req.query.department || req.query.department === "all" || user.department === req.query.department);
+    if (req.query.employee && req.query.employee !== "all") {
+      users = users.filter((user) => asId(user) === req.query.employee);
+    }
+    const selectedIds = users.map((user) => user._id);
+    const activities = await Activity.find({
+      ...dateQuery("loginTime", start, end),
+      ...(selectedIds.length ? { user: { $in: selectedIds } } : {}),
+    }).populate("user", "name department").sort({ loginTime: 1 }).lean();
 
-    const daily = Array.from({ length: dayCount }).slice(0, 31).map((_, index) => {
+    const meetings = await Meeting.find({
+      createdBy: { $in: selectedIds },
+      ...dateQuery("startTime", start, end),
+    }).select("title startTime endTime startLocation endLocation location meetingType status").lean();
+
+    const dayCount = Math.max(Math.ceil((end - start) / 86400000), 1);
+
+    const getDateStr = (d) => {
+      const date = new Date(d);
+      return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+    };
+
+    const userDayMap = {};
+    activities.forEach((activity) => {
+      const uid = asId(activity.user);
+      const day = getDateStr(activity.loginTime);
+      const key = `${uid}_${day}`;
+      if (!userDayMap[key]) {
+        userDayMap[key] = { userId: uid, userName: userName(activity.user), department: activity.user?.department || "-", day, loginTime: activity.loginTime, logoutTime: null, loginLocation: activity.loginLocation, logoutLocation: activity.logoutLocation, isLate: new Date(activity.loginTime).getHours() >= 10 };
+      }
+      if (activity.logoutTime && (!userDayMap[key].logoutTime || new Date(activity.logoutTime) > new Date(userDayMap[key].logoutTime))) {
+        userDayMap[key].logoutTime = activity.logoutTime;
+        userDayMap[key].logoutLocation = activity.logoutLocation;
+      }
+      if (!userDayMap[key].loginLocation?.name && activity.loginLocation?.name) {
+        userDayMap[key].loginLocation = activity.loginLocation;
+      }
+    });
+
+    const dayKeys = Array.from({ length: dayCount }).slice(0, 31).map((_, index) => {
       const date = new Date(start);
       date.setDate(start.getDate() + index);
-      const dayActivities = activities.filter((activity) => new Date(activity.loginTime).toDateString() === date.toDateString());
+      return getDateStr(date);
+    });
+
+    const employeeMap = {};
+    Object.values(userDayMap).forEach((entry) => {
+      const uid = entry.userId;
+      if (!employeeMap[uid]) employeeMap[uid] = { userId: uid, name: entry.userName, department: entry.department, days: {} };
+      employeeMap[uid].days[entry.day] = entry;
+    });
+
+    let totalPresent = 0;
+    let totalPartial = 0;
+    let totalLate = 0;
+    let totalAbsent = 0;
+
+    const daily = dayKeys.map((day) => {
+      let presentCount = 0;
+      let partialCount = 0;
+      let lateCount = 0;
+      let absentCount = 0;
+
+      users.forEach((user) => {
+        const uid = asId(user);
+        const key = `${uid}_${day}`;
+        const entry = userDayMap[key];
+        if (entry) {
+          const hasLogout = !!entry.logoutTime;
+          const hasLoginOnSameDay = entry.loginTime && getDateStr(entry.loginTime) === day;
+          if (hasLogout) {
+            presentCount++;
+            if (entry.isLate) lateCount++;
+          } else if (hasLoginOnSameDay) {
+            partialCount++;
+          }
+        } else {
+          absentCount++;
+        }
+      });
+
+      totalPresent += presentCount;
+      totalPartial += partialCount;
+      totalLate += lateCount;
+      totalAbsent += absentCount;
+
       return {
-        label: `${monthNames[date.getMonth()]} ${String(date.getDate()).padStart(2, "0")}`,
-        present: percent(dayActivities.length, users.length),
-        absent: percent(Math.max(users.length - dayActivities.length, 0), users.length),
-        late: percent(dayActivities.filter((activity) => new Date(activity.loginTime).getHours() >= 10).length, users.length),
-        leave: 0,
+        label: dayLabel(new Date(day)),
+        present: percent(presentCount, users.length),
+        absent: percent(absentCount, users.length),
+        partial: percent(partialCount, users.length),
+        late: percent(lateCount, users.length),
+        presentCount,
+        absentCount,
+        partialCount,
       };
     });
 
-    const departmentRows = options.departments.map((department) => {
+    const totalWorkingDays = users.length * dayKeys.length;
+
+    const departmentRows = options.departments
+      .filter((dept) => users.some((user) => user.department === dept))
+      .map((department) => {
       const deptUsers = users.filter((user) => user.department === department);
-      const deptActivities = activities.filter((activity) => activity.user?.department === department);
-      return { department, present: percent(deptActivities.length, Math.max(deptUsers.length * dayCount, 1)) };
+      let deptPresent = 0;
+      Object.values(userDayMap).forEach((entry) => {
+        if (entry.department === department && entry.logoutTime && getDateStr(entry.loginTime) === entry.day) {
+          deptPresent++;
+        }
+      });
+      return { department, present: percent(deptPresent, Math.max(deptUsers.length * dayKeys.length, 1)) };
     });
 
     const employeeRows = users.map((user) => {
-      const userActivities = activities.filter((activity) => asId(activity.user) === asId(user));
-      const userLate = userActivities.filter((activity) => new Date(activity.loginTime).getHours() >= 10).length;
-      const userAbsent = Math.max(dayCount - userActivities.length, 0);
+      const uid = asId(user);
+      const emp = employeeMap[uid];
+      let presentDays = 0;
+      let partialDays = 0;
+      let lateDays = 0;
+      let absentDays = 0;
+
+      dayKeys.forEach((day) => {
+        const key = `${uid}_${day}`;
+        const entry = userDayMap[key];
+        if (entry) {
+          const hasLogout = !!entry.logoutTime;
+          const hasLoginOnSameDay = entry.loginTime && getDateStr(entry.loginTime) === day;
+          if (hasLogout) {
+            presentDays++;
+            if (entry.isLate) lateDays++;
+          } else if (hasLoginOnSameDay) {
+            partialDays++;
+          }
+        } else {
+          absentDays++;
+        }
+      });
+
+      const activitiesList = activities.filter((a) => asId(a.user) === uid);
+      const firstLogin = activitiesList.length ? activitiesList[0].loginTime : null;
+      const lastLogout = activitiesList.length ? activitiesList[activitiesList.length - 1].logoutTime : null;
+      const userMeetings = meetings.filter((m) => asId(m.createdBy) === uid);
+
       return {
-        id: asId(user),
+        id: uid,
         name: userName(user),
         department: user.department || "-",
-        workingDays: dayCount,
-        presentDays: userActivities.length,
-        absentDays: userAbsent,
-        lateDays: userLate,
+        workingDays: dayKeys.length,
+        presentDays,
+        partialDays,
+        absentDays,
+        lateDays,
         leaveDays: 0,
-        attendancePercent: percent(userActivities.length, dayCount),
+        attendancePercent: percent(presentDays, dayKeys.length),
+        firstLogin,
+        lastLogout,
+        totalMeetings: userMeetings.length,
+        meetingsWithLocation: userMeetings.filter((m) => m.startLocation?.lat).length,
+        activities: (activitiesList || []).map((a) => ({
+          loginTime: a.loginTime,
+          logoutTime: a.logoutTime,
+          loginLocation: a.loginLocation,
+          logoutLocation: a.logoutLocation,
+        })),
+        meetings: userMeetings.map((m) => ({
+          title: m.title,
+          startTime: m.startTime,
+          endTime: m.endTime,
+          meetingType: m.meetingType,
+          status: m.status,
+          location: m.location,
+          startLocation: m.startLocation,
+          endLocation: m.endLocation,
+        })),
       };
     });
 
     return res.json({
       success: true,
       options,
-      summary: { totalEmployees: users.length, present, absent, late, leaves, overallAttendance: percent(present, totalWorkingDays) },
+      summary: {
+        totalEmployees: users.length,
+        totalWorkingDays,
+        present: totalPresent,
+        partial: totalPartial,
+        absent: totalAbsent || Math.max(totalWorkingDays - totalPresent - totalPartial, 0),
+        late: totalLate,
+        leaves: totalPartial,
+        overallAttendance: percent(totalPresent, totalWorkingDays),
+        totalMeetings: meetings.length,
+        meetingsWithLocation: meetings.filter((m) => m.startLocation?.lat).length,
+      },
       daily,
       departmentRows,
       employeeRows,
@@ -529,10 +847,29 @@ export const getAdminAttendanceReport = async (req, res) => {
 export const getAdminSimpleReport = async (req, res) => {
   try {
     const { start, end } = getDateRange(req.query.fromDate, req.query.toDate);
-    const [options, activities, meetings, meetingReports] = await Promise.all([
-      getOptions(),
-      Activity.find(dateQuery("loginTime", start, end)).populate("user", "name department role subRole").sort({ loginTime: -1 }).lean(),
-      Meeting.find(dateQuery("startTime", start, end)).populate("createdBy", "name department").sort({ startTime: -1 }).lean(),
+    const options = await getOptions();
+    const activityQuery = dateQuery("loginTime", start, end);
+    const meetingQuery = dateQuery("startTime", start, end);
+
+    let filterUserIds = null;
+    if (req.query.department && req.query.department !== "all") {
+      filterUserIds = options.users.filter((u) => u.department === req.query.department).map((u) => u._id);
+    }
+    if (req.query.salesManager && req.query.salesManager !== "all") {
+      const mgrUser = options.users.find((u) => asId(u._id) === req.query.salesManager);
+      if (mgrUser) {
+        const mgrIds = options.users.filter((u) => u.managerName === mgrUser.name || asId(u._id) === req.query.salesManager).map((u) => u._id);
+        filterUserIds = filterUserIds ? filterUserIds.filter((id) => mgrIds.some((m) => asId(m) === asId(id))) : mgrIds;
+      }
+    }
+    if (filterUserIds) {
+      activityQuery.user = { $in: filterUserIds };
+      meetingQuery.createdBy = { $in: filterUserIds };
+    }
+
+    const [activities, meetings, meetingReports] = await Promise.all([
+      Activity.find(activityQuery).populate("user", "name department role subRole").sort({ loginTime: -1 }).lean(),
+      Meeting.find(meetingQuery).populate("createdBy", "name department").sort({ startTime: -1 }).lean(),
       MeetingReport.find(dateQuery("meetingDateTime", start, end)).populate("createdBy", "name department").sort({ meetingDateTime: -1 }).lean(),
     ]);
 

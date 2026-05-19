@@ -37,7 +37,8 @@ const allowedOrigins = [
   "https://serlex-sales-frontend.vercel.app",
   "https://serlex-purchase-frontend.vercel.app",
   "https://serlex-admin-frontend.vercel.app",
-  "https://serlex-ppc.vercel.app"
+  "https://serlex-ppc.vercel.app",
+  "https://sales.serlextechnologies.com"
 ];
 
 app.use(
@@ -87,68 +88,68 @@ app.use("/api/admin", adminRoutes);
 
 
 
-const getSelfPingUrl = () => {
-  const selfUrl = process.env.SELF_URL;
+// const getSelfPingUrl = () => {
+//   const selfUrl = process.env.SELF_URL;
 
-  if (!selfUrl) return null;
+//   if (!selfUrl) return null;
 
-  const cleanUrl = selfUrl.trim().replace(/\/$/, "");
+//   const cleanUrl = selfUrl.trim().replace(/\/$/, "");
 
-  if (cleanUrl.endsWith("/api/health")) {
-    return cleanUrl;
-  }
+//   if (cleanUrl.endsWith("/api/health")) {
+//     return cleanUrl;
+//   }
 
-  return `${cleanUrl}/api/health`;
-};
+//   return `${cleanUrl}/api/health`;
+// };
 
-const startSelfPingCron = () => {
-  const selfPingUrl = getSelfPingUrl();
+// const startSelfPingCron = () => {
+//   const selfPingUrl = getSelfPingUrl();
 
-  if (!selfPingUrl) {
-    console.log("⚠️ SELF_URL not found in env. Self ping disabled.");
-    return;
-  }
+//   if (!selfPingUrl) {
+//     console.log("⚠️ SELF_URL not found in env. Self ping disabled.");
+//     return;
+//   }
 
-  console.log("✅ Self ping URL:", selfPingUrl);
+//   console.log("✅ Self ping URL:", selfPingUrl);
 
-  cron.schedule(
-    "*/1 * * * *",
-    async () => {
-      try {
-        const { data } = await axios.get(selfPingUrl, {
-          timeout: 20000,
-        });
+//   cron.schedule(
+//     "*/1 * * * *",
+//     async () => {
+//       try {
+//         const { data } = await axios.get(selfPingUrl, {
+//           timeout: 20000,
+//         });
 
-        console.log(
-          "🔁 Self ping success:",
-          data.message,
-          new Date().toLocaleString("en-IN")
-        );
-      } catch (error) {
-        console.log(
-          "❌ Self ping failed:",
-          error.response?.status || "",
-          error.response?.statusText || error.message
-        );
-      }
-    },
-    {
-      scheduled: true,
-      timezone: "Asia/Kolkata",
-    }
-  );
+//         console.log(
+//           "🔁 Self ping success:",
+//           data.message,
+//           new Date().toLocaleString("en-IN")
+//         );
+//       } catch (error) {
+//         console.log(
+//           "❌ Self ping failed:",
+//           error.response?.status || "",
+//           error.response?.statusText || error.message
+//         );
+//       }
+//     },
+//     {
+//       scheduled: true,
+//       timezone: "Asia/Kolkata",
+//     }
+//   );
 
-  console.log("✅ Self ping cron started. Runs every 1 minute.");
-};
+//   console.log("✅ Self ping cron started. Runs every 1 minute.");
+// };
 
 mongoose
   .connect(process.env.MONGO_URI)
   .then(() => {
     console.log("✅ MongoDB connected successfully");
 
-    app.listen(PORT, () => {
+    app.listen(PORT, "0.0.0.0", () => {
       console.log(`🚀 Server running on port ${PORT}`);
-      startSelfPingCron();
+      // startSelfPingCron();
     });
   })
   .catch((error) => {

@@ -1,6 +1,7 @@
 import Activity from "../models/Activity.js";
 import bcrypt from "bcryptjs";
 import Meeting from "../models/Meeting.js";
+import MeetingReport from "../models/MeetingReport.js";
 import PurchaseOrder from "../models/PurchaseOrder.js";
 import User from "../models/User.js";
 
@@ -31,6 +32,11 @@ export const getAdminDashboard = async (req, res) => {
       poDate: { $gte: start, $lte: end },
     };
 
+    const todayStart = new Date();
+    todayStart.setHours(0, 0, 0, 0);
+    const todayEnd = new Date();
+    todayEnd.setHours(23, 59, 59, 999);
+
     const [
       meetingsScheduled,
       meetingsConfirmed,
@@ -40,6 +46,8 @@ export const getAdminDashboard = async (req, res) => {
       recentMeetings,
       recentPOs,
       recentLogins,
+      todayActivities,
+      totalUsers,
     ] = await Promise.all([
       Meeting.countDocuments({
         ...meetingRangeQuery,
@@ -75,6 +83,10 @@ export const getAdminDashboard = async (req, res) => {
         .sort({ loginTime: -1 })
         .limit(5)
         .lean(),
+      Activity.find({
+        loginTime: { $gte: todayStart, $lte: todayEnd },
+      }).populate("user", "name department").lean(),
+      User.countDocuments({ status: { $ne: "inactive" } }),
     ]);
 
     const notifications = [
@@ -106,6 +118,19 @@ export const getAdminDashboard = async (req, res) => {
       .sort((a, b) => new Date(b.time || 0) - new Date(a.time || 0))
       .slice(0, 8);
 
+    const todayUserMap = {};
+    todayActivities.forEach((a) => {
+      const uid = String(a.user?._id || a.user);
+      if (!todayUserMap[uid]) {
+        todayUserMap[uid] = { loginCount: 0, hasLogout: false, user: a.user };
+      }
+      todayUserMap[uid].loginCount++;
+      if (a.logoutTime) todayUserMap[uid].hasLogout = true;
+    });
+    const todayPresent = Object.values(todayUserMap).filter((u) => u.hasLogout).length;
+    const todayPartial = Object.values(todayUserMap).filter((u) => !u.hasLogout).length;
+    const todayAbsent = Math.max(totalUsers - Object.keys(todayUserMap).length, 0);
+
     return res.status(200).json({
       success: true,
       range: {
@@ -118,6 +143,12 @@ export const getAdminDashboard = async (req, res) => {
         meetingsPending,
         currentMonthPOs,
         activeEmployees,
+        todayAttendance: {
+          present: todayPresent,
+          partial: todayPartial,
+          absent: todayAbsent,
+          total: totalUsers,
+        },
       },
       notifications,
     });
@@ -135,7 +166,7 @@ export const getAdminUsers = async (req, res) => {
     const query =
       req.query.includeInactive === "true" ? {} : { status: { $ne: "inactive" } };
     const users = await User.find(query)
-      .select("name email employeeId mobileNumber department designation managerName territory joiningDate dob username role subRole status")
+      .select("name email employeeId mobileNumber department designation managerName territory joiningDate dob username role subRole status isApprovedByAdmin")
       .sort({ name: 1 })
       .lean();
 
@@ -265,11 +296,12 @@ export const createAdminUser = async (req, res) => {
       role,
       subRole: role === "subadmin" ? subRole : "",
       status: status || "approved",
+      isApprovedByAdmin: true,
       pin: hashedPin,
     });
 
     const safeUser = await User.findById(user._id)
-      .select("name email employeeId mobileNumber department designation managerName territory joiningDate dob username role subRole status")
+      .select("name email employeeId mobileNumber department designation managerName territory joiningDate dob username role subRole status isApprovedByAdmin")
       .lean();
 
     return res.status(201).json({
@@ -383,13 +415,16 @@ export const updateAdminUserStatus = async (req, res) => {
 
     const user = await User.findByIdAndUpdate(
       req.params.id,
-      { status },
+      {
+        status,
+        isApprovedByAdmin: status === "approved",
+      },
       {
         new: true,
         runValidators: true,
       }
     )
-      .select("name email employeeId mobileNumber department designation role subRole status")
+      .select("name email employeeId mobileNumber department designation role subRole status isApprovedByAdmin")
       .lean();
 
     if (!user) {
@@ -413,6 +448,43 @@ export const updateAdminUserStatus = async (req, res) => {
   }
 };
 
+export const approveAdminUser = async (req, res) => {
+  try {
+    const user = await User.findByIdAndUpdate(
+      req.params.id,
+      {
+        status: "approved",
+        isApprovedByAdmin: true,
+      },
+      {
+        new: true,
+        runValidators: true,
+      }
+    )
+      .select("name email employeeId mobileNumber department designation role subRole status isApprovedByAdmin")
+      .lean();
+
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: "User not found",
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: "User approved successfully",
+      user,
+    });
+  } catch (error) {
+    console.error("approveAdminUser error:", error);
+    return res.status(500).json({
+      success: false,
+      message: error.message || "Failed to approve user",
+    });
+  }
+};
+
 export const getAdminMeetings = async (req, res) => {
   try {
     const query = {};
@@ -429,10 +501,27 @@ export const getAdminMeetings = async (req, res) => {
       .sort({ startTime: 1 })
       .lean();
 
+    const meetingIds = meetings.filter(m => m._id).map(m => m._id);
+    const reports = await MeetingReport.find({ meeting: { $in: meetingIds } })
+      .populate("createdBy", "name email")
+      .lean();
+    const reportsByMeetingId = {};
+    reports.forEach((r) => {
+      const mid = String(r.meeting || "");
+      if (mid) {
+        if (!reportsByMeetingId[mid]) reportsByMeetingId[mid] = [];
+        reportsByMeetingId[mid].push(r);
+      }
+    });
+    const meetingsWithReports = meetings.map((m) => ({
+      ...m,
+      reports: reportsByMeetingId[String(m._id)] || [],
+    }));
+
     return res.status(200).json({
       success: true,
-      count: meetings.length,
-      meetings,
+      count: meetingsWithReports.length,
+      meetings: meetingsWithReports,
     });
   } catch (error) {
     console.error("getAdminMeetings error:", error);
