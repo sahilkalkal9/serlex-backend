@@ -1,7 +1,7 @@
 # backend deploy automation
 name: Deploy Serlex Backend
 
-on:
+"on":
   push:
     branches:
       - main
