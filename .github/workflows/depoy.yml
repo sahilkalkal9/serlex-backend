@@ -82,13 +82,30 @@ jobs:
             mkdir -p "$BACKUP_DIR"
 
             echo "Creating backup..."
-            rsync -a --exclude node_modules "$REMOTE_PATH/" "$BACKUP_DIR/" || true
+            rsync -a \
+              --exclude node_modules \
+              --exclude .npm \
+              --exclude .nvm \
+              "$REMOTE_PATH/" "$BACKUP_DIR/" || true
 
-            echo "Cleaning old files but keeping .env and node_modules..."
-            find "$REMOTE_PATH" -mindepth 1 \
-              ! -name ".env" \
-              ! -name "node_modules" \
-              -exec rm -rf {} +
+            echo "Cleaning old files but keeping .env, node_modules, .npm, .nvm and logs..."
+            cd "$REMOTE_PATH"
+
+            for item in "$REMOTE_PATH"/* "$REMOTE_PATH"/.[!.]* "$REMOTE_PATH"/..?*; do
+              [ -e "$item" ] || continue
+
+              base="$(basename "$item")"
+
+              case "$base" in
+                ".env"|"node_modules"|".npm"|".nvm"|".gitignore"|"persistent_app_"*.log)
+                  echo "Keeping $base"
+                  ;;
+                *)
+                  echo "Removing $base"
+                  rm -rf "$item"
+                  ;;
+              esac
+            done
 
             echo "Extracting latest backend..."
             tar -xzf "$RELEASE_TAR" -C "$REMOTE_PATH"
@@ -98,6 +115,9 @@ jobs:
 
             echo "Installing production dependencies..."
             npm ci --omit=dev || npm install --omit=dev
+
+            echo "Fixing file ownership..."
+            chown -R backend_1:backend_1 "$REMOTE_PATH" || true
 
             echo "Restarting backend..."
             if command -v pm2 >/dev/null 2>&1; then
