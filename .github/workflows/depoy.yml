@@ -11,7 +11,6 @@ on:
 env:
   APP_NAME: serlex-backend
   REMOTE_PATH: /var/www/a0973e2f-1de5-4fa0-b314-d5045219fdc2
-  NODE_VERSION: v26.1.0
 
 jobs:
   deploy:
@@ -28,7 +27,7 @@ jobs:
           node-version: 20
           cache: npm
 
-      - name: Install dependencies locally for validation
+      - name: Validate dependencies on GitHub runner
         run: npm ci
 
       - name: Create backend deploy package
@@ -66,7 +65,6 @@ jobs:
 
             APP_NAME="${{ env.APP_NAME }}"
             REMOTE_PATH="${{ env.REMOTE_PATH }}"
-            NODE_VERSION="${{ env.NODE_VERSION }}"
             RELEASE_TAR="/tmp/backend-deploy.tar.gz"
             BACKUP_ROOT="/var/backups/serlex-deploys"
             BACKUP_DIR="${BACKUP_ROOT}/${APP_NAME}-$(date +%Y%m%d-%H%M%S)"
@@ -74,11 +72,15 @@ jobs:
             echo "=================================="
             echo "Deploying backend"
             echo "Remote path: $REMOTE_PATH"
-            echo "Node version: $NODE_VERSION"
             echo "=================================="
 
             if [ ! -d "$REMOTE_PATH" ]; then
               echo "ERROR: Remote path does not exist: $REMOTE_PATH"
+              exit 1
+            fi
+
+            if [ ! -f "$RELEASE_TAR" ]; then
+              echo "ERROR: Release package not found: $RELEASE_TAR"
               exit 1
             fi
 
@@ -92,7 +94,7 @@ jobs:
               --exclude .nvm \
               "$REMOTE_PATH/" "$BACKUP_DIR/" || true
 
-            echo "Cleaning old files but keeping .env, node_modules, .npm, .nvm and logs..."
+            echo "Cleaning old backend files but keeping .env, node_modules, .npm, .nvm and logs..."
             cd "$REMOTE_PATH"
 
             for item in "$REMOTE_PATH"/* "$REMOTE_PATH"/.[!.]* "$REMOTE_PATH"/..?*; do
@@ -117,34 +119,19 @@ jobs:
 
             cd "$REMOTE_PATH"
 
-            echo "Loading Node.js from NVM..."
-            export NVM_DIR="$REMOTE_PATH/.nvm"
-
-            if [ -s "$NVM_DIR/nvm.sh" ]; then
-              echo "Found nvm.sh"
-              . "$NVM_DIR/nvm.sh"
-              nvm use "$NODE_VERSION" || nvm use node
-            else
-              echo "nvm.sh not found, using direct Node path"
-              export PATH="$REMOTE_PATH/.nvm/versions/node/$NODE_VERSION/bin:$PATH"
-            fi
-
-            echo "Checking Node and NPM..."
-            node -v
-            npm -v
-
-            echo "Installing production dependencies..."
-            npm ci --omit=dev || npm install --omit=dev
+            echo "Skipping server npm install because node_modules is preserved."
+            echo "If package.json dependencies change, install dependencies manually once from Enhance/SSH."
 
             echo "Fixing file ownership..."
             chown -R backend_1:backend_1 "$REMOTE_PATH" || true
 
-            echo "Restarting backend..."
+            echo "Trying to restart backend with PM2 if available..."
             if command -v pm2 >/dev/null 2>&1; then
               pm2 restart "$APP_NAME" || pm2 restart server || pm2 restart all || true
               pm2 save || true
             else
-              echo "PM2 not found. Restart from Enhance panel if required."
+              echo "PM2 not found. Deployment done."
+              echo "Restart app from Enhance panel if latest code does not reflect."
             fi
 
             echo "Backend deployment completed successfully."
