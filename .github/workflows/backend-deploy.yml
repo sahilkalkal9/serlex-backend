@@ -1,7 +1,6 @@
-# backend deploy automation
 name: Deploy Serlex Backend
 
-"on":
+on:
   push:
     branches:
       - main
@@ -11,8 +10,6 @@ name: Deploy Serlex Backend
 env:
   APP_NAME: serlex-backend
   REMOTE_PATH: /var/www/a0973e2f-1de5-4fa0-b314-d5045219fdc2
-  APP_OWNER: backend_1
-  APP_GROUP: backend_1
 
 jobs:
   deploy:
@@ -23,18 +20,17 @@ jobs:
       - name: Checkout latest backend code
         uses: actions/checkout@v4
 
-      - name: Setup Node.js on GitHub runner
+      - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: 20
           cache: npm
 
-      - name: Validate backend dependencies
+      - name: Install dependencies locally for validation
         run: npm ci
 
       - name: Create backend deploy package
         run: |
-          rm -rf deploy-package backend-deploy.tar.gz
           mkdir -p deploy-package
 
           rsync -a ./ deploy-package/ \
@@ -42,7 +38,6 @@ jobs:
             --exclude .git \
             --exclude .github \
             --exclude .env \
-            --exclude deploy-package \
             --exclude "*.tar.gz"
 
           tar -czf backend-deploy.tar.gz -C deploy-package .
@@ -69,8 +64,6 @@ jobs:
 
             APP_NAME="${{ env.APP_NAME }}"
             REMOTE_PATH="${{ env.REMOTE_PATH }}"
-            APP_OWNER="${{ env.APP_OWNER }}"
-            APP_GROUP="${{ env.APP_GROUP }}"
             RELEASE_TAR="/tmp/backend-deploy.tar.gz"
             BACKUP_ROOT="/var/backups/serlex-deploys"
             BACKUP_DIR="${BACKUP_ROOT}/${APP_NAME}-$(date +%Y%m%d-%H%M%S)"
@@ -85,39 +78,17 @@ jobs:
               exit 1
             fi
 
-            if [ ! -f "$RELEASE_TAR" ]; then
-              echo "ERROR: Release package not found: $RELEASE_TAR"
-              exit 1
-            fi
-
             mkdir -p "$BACKUP_ROOT"
             mkdir -p "$BACKUP_DIR"
 
             echo "Creating backup..."
-            rsync -a \
-              --exclude node_modules \
-              --exclude .npm \
-              --exclude .nvm \
-              "$REMOTE_PATH/" "$BACKUP_DIR/" || true
+            rsync -a --exclude node_modules "$REMOTE_PATH/" "$BACKUP_DIR/" || true
 
-            echo "Cleaning old backend files but keeping .env, node_modules, .npm, .nvm and logs..."
-            cd "$REMOTE_PATH"
-
-            for item in "$REMOTE_PATH"/* "$REMOTE_PATH"/.[!.]* "$REMOTE_PATH"/..?*; do
-              [ -e "$item" ] || continue
-
-              base="$(basename "$item")"
-
-              case "$base" in
-                ".env"|"node_modules"|".npm"|".nvm"|".gitignore"|"persistent_app_"*.log)
-                  echo "Keeping $base"
-                  ;;
-                *)
-                  echo "Removing $base"
-                  rm -rf "$item"
-                  ;;
-              esac
-            done
+            echo "Cleaning old files but keeping .env and node_modules..."
+            find "$REMOTE_PATH" -mindepth 1 \
+              ! -name ".env" \
+              ! -name "node_modules" \
+              -exec rm -rf {} +
 
             echo "Extracting latest backend..."
             tar -xzf "$RELEASE_TAR" -C "$REMOTE_PATH"
@@ -125,19 +96,15 @@ jobs:
 
             cd "$REMOTE_PATH"
 
-            echo "Skipping server npm install because node_modules is preserved."
-            echo "If package.json dependencies change, run npm install manually once from Enhance/SSH."
+            echo "Installing production dependencies..."
+            npm ci --omit=dev || npm install --omit=dev
 
-            echo "Fixing file ownership..."
-            chown -R "$APP_OWNER:$APP_GROUP" "$REMOTE_PATH" || true
-
-            echo "Trying to restart backend with PM2 if available..."
+            echo "Restarting backend..."
             if command -v pm2 >/dev/null 2>&1; then
               pm2 restart "$APP_NAME" || pm2 restart server || pm2 restart all || true
               pm2 save || true
             else
-              echo "PM2 not found. Deployment done."
-              echo "Restart app from Enhance panel if latest code does not reflect."
+              echo "PM2 not found. Restart from Enhance panel if required."
             fi
 
             echo "Backend deployment completed successfully."
