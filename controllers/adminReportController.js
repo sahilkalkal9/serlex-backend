@@ -85,75 +85,68 @@ const getOptions = async () => {
   return {
     users,
     departments,
-    salesManagers: users.filter((user) => user.subRole === "sales_manager" || user.role === "sales_user"),
+    salesManagers: users.filter((user) => user.subRole === "sales_manager"),
+    salesUsers: users.filter((user) => user.role === "sales_user" && user.subRole !== "sales_manager"),
     teams: departments.map((department) => ({ id: department, name: department })),
   };
 };
 
 const buildSalesData = async (start, end, filters = {}) => {
-  const { users, departments, salesManagers } = await getOptions();
-  const selectedUsers = salesManagers.filter((user) => {
+  const { users, departments, salesManagers, salesUsers } = await getOptions();
+
+  // Filter actual sales managers based on filters
+  const selectedManagers = salesManagers.filter((user) => {
     if (filters.department && filters.department !== "all" && user.department !== filters.department) return false;
     if (filters.salesManager && filters.salesManager !== "all" && asId(user) !== filters.salesManager) return false;
     return true;
   });
-  const selectedIds = selectedUsers.map((user) => user._id);
-  const monthKeys = getMonthKeys(start, end);
-  const periodKeys = monthKeys;
-  const targetQuery = { period: "Monthly", periodKey: { $in: periodKeys } };
-  const poQuery = dateQuery("poDate", start, end);
+  const selectedManagerIds = selectedManagers.map((user) => user._id);
 
-  if (selectedIds.length) {
-    targetQuery.salesUser = { $in: selectedIds };
-    poQuery.createdBy = { $in: selectedIds };
-  }
-
-  // Build manager -> team members mapping (by managerName field)
-  const allUsers = await User.find({ status: { $ne: "inactive" } })
-    .select("name managerName")
-    .lean();
+  // Build manager -> team members mapping (sales users whose managerName matches manager's name)
   const managerTeamMap = {};
-  selectedUsers.forEach((manager) => {
+  selectedManagers.forEach((manager) => {
     const mName = manager.name?.toLowerCase().trim();
     if (!mName) return;
-    const members = allUsers.filter(
-      (u) => u.managerName?.toLowerCase().trim() === mName && asId(u) !== asId(manager)
+    const members = salesUsers.filter(
+      (u) => u.managerName?.toLowerCase().trim() === mName
     );
     if (members.length) {
       managerTeamMap[asId(manager)] = members.map(asId);
     }
   });
   const allTeamMemberIds = [...new Set(Object.values(managerTeamMap).flat())];
+  // Include manager IDs to fetch their own targets/POs too
+  const allRelevantIds = [...new Set([...allTeamMemberIds, ...selectedManagerIds])];
 
-  const [targets, purchaseOrders, teamTargets, teamPos] = await Promise.all([
-    SalesTarget.find(targetQuery).populate("salesUser", "name department managerName").lean(),
-    PurchaseOrder.find(poQuery).populate("createdBy", "name department managerName").lean(),
-    allTeamMemberIds.length
-      ? SalesTarget.find({ period: "Monthly", periodKey: { $in: periodKeys }, salesUser: { $in: allTeamMemberIds } })
+  const monthKeys = getMonthKeys(start, end);
+  const periodKeys = monthKeys;
+
+  // Fetch targets & POs for all relevant users (managers + their team members)
+  const [teamTargets, teamPos] = await Promise.all([
+    allRelevantIds.length
+      ? SalesTarget.find({ period: "Monthly", periodKey: { $in: periodKeys }, salesUser: { $in: allRelevantIds } })
           .populate("salesUser", "name department managerName").lean()
       : Promise.resolve([]),
-    allTeamMemberIds.length
-      ? PurchaseOrder.find({ ...dateQuery("poDate", start, end), createdBy: { $in: allTeamMemberIds } })
+    allRelevantIds.length
+      ? PurchaseOrder.find({ ...dateQuery("poDate", start, end), createdBy: { $in: allRelevantIds } })
           .populate("createdBy", "name department managerName").lean()
       : Promise.resolve([]),
   ]);
 
+  // Overall monthly data (all team members combined)
   const monthly = monthKeys.map((key) => {
-    const target = targets.filter((item) => item.periodKey === key).reduce((total, item) => total + Number(item.targetAmount || 0), 0);
-    const achieved = purchaseOrders.filter((po) => monthKey(po.poDate) === key).reduce((total, po) => total + Number(po.poValue || 0), 0);
-    return { key, label: monthLabel(key), target, achieved, achievement: percent(achieved, target) };
-  });
-
-  const monthlyTeam = monthKeys.map((key) => {
     const target = teamTargets.filter((item) => item.periodKey === key).reduce((total, item) => total + Number(item.targetAmount || 0), 0);
     const achieved = teamPos.filter((po) => monthKey(po.poDate) === key).reduce((total, po) => total + Number(po.poValue || 0), 0);
     return { key, label: monthLabel(key), target, achieved, achievement: percent(achieved, target) };
   });
 
-  const managerRows = selectedUsers.map((manager) => {
+  // Manager rows = each manager's team aggregated data + manager's own data
+  const managerRows = selectedManagers.map((manager) => {
     const id = asId(manager);
-    const target = targets.filter((item) => asId(item.salesUser) === id).reduce((total, item) => total + Number(item.targetAmount || 0), 0);
-    const achieved = purchaseOrders.filter((po) => asId(po.createdBy) === id).reduce((total, po) => total + Number(po.poValue || 0), 0);
+    const memberIds = managerTeamMap[id] || [];
+    const allIds = [...new Set([...memberIds, id])];
+    const target = teamTargets.filter((t) => allIds.includes(asId(t.salesUser))).reduce((total, t) => total + Number(t.targetAmount || 0), 0);
+    const achieved = teamPos.filter((po) => allIds.includes(asId(po.createdBy))).reduce((total, po) => total + Number(po.poValue || 0), 0);
     return {
       id,
       name: userName(manager),
@@ -166,29 +159,37 @@ const buildSalesData = async (start, end, filters = {}) => {
     };
   });
 
-  const departmentRows = departments.map((department) => {
-    const userIds = users.filter((user) => user.department === department).map(asId);
-    const target = targets.filter((item) => userIds.includes(asId(item.salesUser))).reduce((total, item) => total + Number(item.targetAmount || 0), 0);
-    const achieved = purchaseOrders.filter((po) => userIds.includes(asId(po.createdBy))).reduce((total, po) => total + Number(po.poValue || 0), 0);
-    return { department, target, achieved, achievement: percent(achieved, target), variance: Math.max(target - achieved, 0) };
-  }).filter((row) => row.target || row.achieved);
-
-  // Real team rows: target given by each sales manager to their team, vs team achievement
-  const teamRows = selectedUsers.map((manager) => {
+  // Team rows = individual team members (sales users) under each manager
+  const teamRows = selectedManagers.flatMap((manager) => {
     const id = asId(manager);
     const memberIds = managerTeamMap[id] || [];
-    const target = teamTargets.filter((t) => memberIds.includes(asId(t.salesUser))).reduce((total, t) => total + Number(t.targetAmount || 0), 0);
-    const achieved = teamPos.filter((po) => memberIds.includes(asId(po.createdBy))).reduce((total, po) => total + Number(po.poValue || 0), 0);
-    return {
-      id,
-      name: `${userName(manager)} Team`,
-      department: manager.department || "Sales",
-      target,
-      achieved,
-      achievement: percent(achieved, target),
-      variance: Math.max(target - achieved, 0),
-    };
+    return memberIds.map((memberId) => {
+      const user = salesUsers.find((u) => asId(u) === memberId);
+      const target = teamTargets.filter((t) => asId(t.salesUser) === memberId).reduce((total, t) => total + Number(t.targetAmount || 0), 0);
+      const achieved = teamPos.filter((po) => asId(po.createdBy) === memberId).reduce((total, po) => total + Number(po.poValue || 0), 0);
+      return {
+        id: memberId,
+        name: userName(user),
+        department: user?.department || "Sales",
+        managerName: manager.name,
+        target,
+        achieved,
+        achievement: percent(achieved, target),
+        variance: Math.max(target - achieved, 0),
+      };
+    });
   }).filter((row) => row.target > 0 || row.achieved > 0);
+
+  // Monthly team data = same as overall monthly (team members are the data source)
+  const monthlyTeam = monthly;
+
+  // Department rows from all relevant users (managers + team members)
+  const departmentRows = departments.map((department) => {
+    const deptUserIds = users.filter((user) => user.department === department).map(asId).filter((id) => allRelevantIds.includes(id));
+    const target = teamTargets.filter((item) => deptUserIds.includes(asId(item.salesUser))).reduce((total, t) => total + Number(t.targetAmount || 0), 0);
+    const achieved = teamPos.filter((po) => deptUserIds.includes(asId(po.createdBy))).reduce((total, po) => total + Number(po.poValue || 0), 0);
+    return { department, target, achieved, achievement: percent(achieved, target), variance: Math.max(target - achieved, 0) };
+  }).filter((row) => row.target || row.achieved);
 
   const totalTarget = sum(managerRows, "target");
   const totalAchieved = sum(managerRows, "achieved");
@@ -197,7 +198,7 @@ const buildSalesData = async (start, end, filters = {}) => {
     : 0;
 
   return {
-    options: await getOptions(),
+    options: { ...(await getOptions()), salesManagers, salesUsers },
     summary: {
       totalTarget,
       totalAchieved,
@@ -314,18 +315,24 @@ export const getAdminLoginLogoutReport = async (req, res) => {
         id: asId(user),
         name: userName(user),
         department: user.department || "General",
+        role: user.role || "",
+        subRole: user.subRole || "",
+        designation: user.designation || "",
         totalLogins: rows.length,
         totalLogouts: rows.filter((activity) => activity.logoutTime).length,
         activeHours: formatHours(userDuration),
         activeHoursValue: Math.round(userDuration / 3600000),
         avgSessionDuration: formatHours(rows.length ? userDuration / rows.length : 0),
         activeUsers: rows.length ? 1 : 0,
-        activities: rows.map((a) => ({
-          loginTime: a.loginTime,
-          logoutTime: a.logoutTime,
-          loginLocation: a.loginLocation,
-          logoutLocation: a.logoutLocation,
-        })),
+        activities: rows
+          .slice()
+          .sort((a, b) => new Date(b.loginTime) - new Date(a.loginTime))
+          .map((a) => ({
+            loginTime: a.loginTime,
+            logoutTime: a.logoutTime,
+            loginLocation: a.loginLocation,
+            logoutLocation: a.logoutLocation,
+          })),
       };
     }).filter((row) => row.totalLogins || row.totalLogouts);
 
@@ -681,6 +688,16 @@ export const getAdminAttendanceReport = async (req, res) => {
       }
     });
 
+    Object.values(userDayMap).forEach((entry) => {
+      if (entry.loginTime && entry.logoutTime) {
+        const loginHour = new Date(entry.loginTime).getHours();
+        const logoutHour = new Date(entry.logoutTime).getHours();
+        entry.isHalfDay = loginHour < 10 && logoutHour < 18;
+      } else {
+        entry.isHalfDay = false;
+      }
+    });
+
     const dayKeys = Array.from({ length: dayCount }).slice(0, 31).map((_, index) => {
       const date = new Date(start);
       date.setDate(start.getDate() + index);
@@ -698,12 +715,14 @@ export const getAdminAttendanceReport = async (req, res) => {
     let totalPartial = 0;
     let totalLate = 0;
     let totalAbsent = 0;
+    let totalHalfDay = 0;
 
     const daily = dayKeys.map((day) => {
       let presentCount = 0;
       let partialCount = 0;
       let lateCount = 0;
       let absentCount = 0;
+      let halfDayCount = 0;
 
       users.forEach((user) => {
         const uid = asId(user);
@@ -715,6 +734,7 @@ export const getAdminAttendanceReport = async (req, res) => {
           if (hasLogout) {
             presentCount++;
             if (entry.isLate) lateCount++;
+            if (entry.isHalfDay) halfDayCount++;
           } else if (hasLoginOnSameDay) {
             partialCount++;
           }
@@ -727,6 +747,7 @@ export const getAdminAttendanceReport = async (req, res) => {
       totalPartial += partialCount;
       totalLate += lateCount;
       totalAbsent += absentCount;
+      totalHalfDay += halfDayCount;
 
       return {
         label: dayLabel(new Date(day)),
@@ -734,9 +755,12 @@ export const getAdminAttendanceReport = async (req, res) => {
         absent: percent(absentCount, users.length),
         partial: percent(partialCount, users.length),
         late: percent(lateCount, users.length),
+        halfDay: percent(halfDayCount, users.length),
         presentCount,
         absentCount,
         partialCount,
+        lateCount,
+        halfDayCount,
       };
     });
 
@@ -747,12 +771,29 @@ export const getAdminAttendanceReport = async (req, res) => {
       .map((department) => {
       const deptUsers = users.filter((user) => user.department === department);
       let deptPresent = 0;
+      let deptPartial = 0;
       Object.values(userDayMap).forEach((entry) => {
-        if (entry.department === department && entry.logoutTime && getDateStr(entry.loginTime) === entry.day) {
-          deptPresent++;
+        if (entry.department === department) {
+          const hasLogout = !!entry.logoutTime;
+          const hasLoginOnSameDay = entry.loginTime && getDateStr(entry.loginTime) === entry.day;
+          if (hasLogout) {
+            deptPresent++;
+          } else if (hasLoginOnSameDay) {
+            deptPartial++;
+          }
         }
       });
-      return { department, present: percent(deptPresent, Math.max(deptUsers.length * dayKeys.length, 1)) };
+      const totalCount = deptUsers.length * dayKeys.length;
+      const deptAbsent = Math.max(totalCount - deptPresent - deptPartial, 0);
+      return {
+        department,
+        present: percent(deptPresent, Math.max(totalCount, 1)),
+        partial: percent(deptPartial, Math.max(totalCount, 1)),
+        absent: percent(deptAbsent, Math.max(totalCount, 1)),
+        presentCount: deptPresent,
+        partialCount: deptPartial,
+        totalCount,
+      };
     });
 
     const employeeRows = users.map((user) => {
@@ -762,6 +803,7 @@ export const getAdminAttendanceReport = async (req, res) => {
       let partialDays = 0;
       let lateDays = 0;
       let absentDays = 0;
+      let halfDays = 0;
 
       dayKeys.forEach((day) => {
         const key = `${uid}_${day}`;
@@ -772,6 +814,7 @@ export const getAdminAttendanceReport = async (req, res) => {
           if (hasLogout) {
             presentDays++;
             if (entry.isLate) lateDays++;
+            if (entry.isHalfDay) halfDays++;
           } else if (hasLoginOnSameDay) {
             partialDays++;
           }
@@ -794,8 +837,9 @@ export const getAdminAttendanceReport = async (req, res) => {
         partialDays,
         absentDays,
         lateDays,
+        halfDays,
         leaveDays: 0,
-        attendancePercent: percent(presentDays, dayKeys.length),
+        attendancePercent: percent(presentDays - halfDays * 0.5, dayKeys.length),
         firstLogin,
         lastLogout,
         totalMeetings: userMeetings.length,
@@ -829,8 +873,9 @@ export const getAdminAttendanceReport = async (req, res) => {
         partial: totalPartial,
         absent: totalAbsent || Math.max(totalWorkingDays - totalPresent - totalPartial, 0),
         late: totalLate,
+        halfDay: totalHalfDay,
         leaves: totalPartial,
-        overallAttendance: percent(totalPresent, totalWorkingDays),
+        overallAttendance: percent(totalPresent - totalHalfDay * 0.5, totalWorkingDays),
         totalMeetings: meetings.length,
         meetingsWithLocation: meetings.filter((m) => m.startLocation?.lat).length,
       },
@@ -860,6 +905,14 @@ export const getAdminSimpleReport = async (req, res) => {
       if (mgrUser) {
         const mgrIds = options.users.filter((u) => u.managerName === mgrUser.name || asId(u._id) === req.query.salesManager).map((u) => u._id);
         filterUserIds = filterUserIds ? filterUserIds.filter((id) => mgrIds.some((m) => asId(m) === asId(id))) : mgrIds;
+      }
+    }
+    if (req.query.employee && req.query.employee !== "all") {
+      if (filterUserIds) {
+        filterUserIds = filterUserIds.filter((id) => asId(id) === req.query.employee);
+      } else {
+        const empUser = options.users.find((u) => asId(u._id) === req.query.employee);
+        if (empUser) filterUserIds = [empUser._id];
       }
     }
     if (filterUserIds) {
