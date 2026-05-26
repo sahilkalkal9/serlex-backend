@@ -1,0 +1,20 @@
+name: Serlex Backend Deploy
+
+on:
+  push:
+    branches:
+      - main
+
+  workflow_dispatch:
+
+jobs:
+  test:
+    name: Test GitHub Actions
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Print test message
+        run: |
+          echo "Serlex backend workflow is working"
+          echo "Branch: ${{ github.ref }}"
+          echo "Commit: ${{ github.sha }}"
