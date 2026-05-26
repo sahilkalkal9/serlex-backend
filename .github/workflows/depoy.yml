@@ -10,6 +10,7 @@ on:
 env:
   APP_NAME: serlex-backend
   REMOTE_PATH: /var/www/a0973e2f-1de5-4fa0-b314-d5045219fdc2
+  NODE_VERSION: v26.1.0
 
 jobs:
   deploy:
@@ -26,7 +27,7 @@ jobs:
           node-version: 20
           cache: npm
 
-      - name: Validate dependencies on GitHub runner
+      - name: Install dependencies locally for validation
         run: npm ci
 
       - name: Create backend deploy package
@@ -64,6 +65,7 @@ jobs:
 
             APP_NAME="${{ env.APP_NAME }}"
             REMOTE_PATH="${{ env.REMOTE_PATH }}"
+            NODE_VERSION="${{ env.NODE_VERSION }}"
             RELEASE_TAR="/tmp/backend-deploy.tar.gz"
             BACKUP_ROOT="/var/backups/serlex-deploys"
             BACKUP_DIR="${BACKUP_ROOT}/${APP_NAME}-$(date +%Y%m%d-%H%M%S)"
@@ -71,6 +73,7 @@ jobs:
             echo "=================================="
             echo "Deploying backend"
             echo "Remote path: $REMOTE_PATH"
+            echo "Node version: $NODE_VERSION"
             echo "=================================="
 
             if [ ! -d "$REMOTE_PATH" ]; then
@@ -111,17 +114,36 @@ jobs:
             tar -xzf "$RELEASE_TAR" -C "$REMOTE_PATH"
             rm -f "$RELEASE_TAR"
 
+            cd "$REMOTE_PATH"
+
+            echo "Loading Node.js from NVM..."
+            export NVM_DIR="$REMOTE_PATH/.nvm"
+
+            if [ -s "$NVM_DIR/nvm.sh" ]; then
+              echo "Found nvm.sh"
+              . "$NVM_DIR/nvm.sh"
+              nvm use "$NODE_VERSION" || nvm use node
+            else
+              echo "nvm.sh not found, using direct Node path"
+              export PATH="$REMOTE_PATH/.nvm/versions/node/$NODE_VERSION/bin:$PATH"
+            fi
+
+            echo "Checking Node and NPM..."
+            node -v
+            npm -v
+
+            echo "Installing production dependencies..."
+            npm ci --omit=dev || npm install --omit=dev
+
             echo "Fixing file ownership..."
             chown -R backend_1:backend_1 "$REMOTE_PATH" || true
 
-            echo "Trying to restart backend with PM2 if available..."
+            echo "Restarting backend..."
             if command -v pm2 >/dev/null 2>&1; then
               pm2 restart "$APP_NAME" || pm2 restart server || pm2 restart all || true
               pm2 save || true
             else
-              echo "PM2 not found. Deployment done. Restart app from Enhance panel if latest code does not reflect."
+              echo "PM2 not found. Restart from Enhance panel if required."
             fi
 
             echo "Backend deployment completed successfully."
-
-            
