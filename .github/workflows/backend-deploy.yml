@@ -1,4 +1,4 @@
-name: Deploy Serlex Backend
+name: Deploy Serlex Backend New
 
 on:
   push:
