@@ -1,4 +1,4 @@
-name: Deploy Serlex Backend New
+name: Test Backend Workflow
 
 on:
   push:
@@ -7,104 +7,13 @@ on:
 
   workflow_dispatch:
 
-env:
-  APP_NAME: serlex-backend
-  REMOTE_PATH: /var/www/a0973e2f-1de5-4fa0-b314-d5045219fdc2
-
 jobs:
-  deploy:
-    name: Deploy Backend to Enhance
+  test:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout latest backend code
-        uses: actions/checkout@v4
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: 20
-          cache: npm
-
-      - name: Install dependencies locally for validation
-        run: npm ci
-
-      - name: Create backend deploy package
+      - name: Test workflow trigger
         run: |
-          mkdir -p deploy-package
-
-          rsync -a ./ deploy-package/ \
-            --exclude node_modules \
-            --exclude .git \
-            --exclude .github \
-            --exclude .env \
-            --exclude "*.tar.gz"
-
-          tar -czf backend-deploy.tar.gz -C deploy-package .
-
-      - name: Upload backend package to server
-        uses: appleboy/scp-action@v0.1.7
-        with:
-          host: ${{ secrets.SERVER_HOST }}
-          username: ${{ secrets.SERVER_USER }}
-          key: ${{ secrets.SERVER_SSH_KEY }}
-          port: ${{ secrets.SERVER_PORT }}
-          source: backend-deploy.tar.gz
-          target: /tmp
-
-      - name: Deploy backend on Enhance server
-        uses: appleboy/ssh-action@v1.0.3
-        with:
-          host: ${{ secrets.SERVER_HOST }}
-          username: ${{ secrets.SERVER_USER }}
-          key: ${{ secrets.SERVER_SSH_KEY }}
-          port: ${{ secrets.SERVER_PORT }}
-          script: |
-            set -e
-
-            APP_NAME="${{ env.APP_NAME }}"
-            REMOTE_PATH="${{ env.REMOTE_PATH }}"
-            RELEASE_TAR="/tmp/backend-deploy.tar.gz"
-            BACKUP_ROOT="/var/backups/serlex-deploys"
-            BACKUP_DIR="${BACKUP_ROOT}/${APP_NAME}-$(date +%Y%m%d-%H%M%S)"
-
-            echo "=================================="
-            echo "Deploying backend"
-            echo "Remote path: $REMOTE_PATH"
-            echo "=================================="
-
-            if [ ! -d "$REMOTE_PATH" ]; then
-              echo "ERROR: Remote path does not exist: $REMOTE_PATH"
-              exit 1
-            fi
-
-            mkdir -p "$BACKUP_ROOT"
-            mkdir -p "$BACKUP_DIR"
-
-            echo "Creating backup..."
-            rsync -a --exclude node_modules "$REMOTE_PATH/" "$BACKUP_DIR/" || true
-
-            echo "Cleaning old files but keeping .env and node_modules..."
-            find "$REMOTE_PATH" -mindepth 1 \
-              ! -name ".env" \
-              ! -name "node_modules" \
-              -exec rm -rf {} +
-
-            echo "Extracting latest backend..."
-            tar -xzf "$RELEASE_TAR" -C "$REMOTE_PATH"
-            rm -f "$RELEASE_TAR"
-
-            cd "$REMOTE_PATH"
-
-            echo "Installing production dependencies..."
-            npm ci --omit=dev || npm install --omit=dev
-
-            echo "Restarting backend..."
-            if command -v pm2 >/dev/null 2>&1; then
-              pm2 restart "$APP_NAME" || pm2 restart server || pm2 restart all || true
-              pm2 save || true
-            else
-              echo "PM2 not found. Restart from Enhance panel if required."
-            fi
-
-            echo "Backend deployment completed successfully."
+          echo "GitHub Actions trigger is working"
+          echo "Branch: ${{ github.ref }}"
+          echo "Commit: ${{ github.sha }}"
