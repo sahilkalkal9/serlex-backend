@@ -76,10 +76,10 @@ const getDaySeries = (start, end) => {
 };
 
 const getOptions = async () => {
-  const users = await User.find({ status: { $ne: "inactive" } })
+  const users = (await User.find({ status: { $ne: "inactive" } })
     .select("name email department designation role subRole managerName")
     .sort({ name: 1 })
-    .lean();
+    .lean()).filter((user) => !["admin", "superadmin"].includes(user?.role?.toLowerCase()));
   const departments = [...new Set(users.map((user) => user.department).filter(Boolean))].sort();
 
   return {
@@ -290,7 +290,7 @@ export const getAdminLoginLogoutReport = async (req, res) => {
     const selectedIds = selectedUsers.map((user) => user._id);
     const activities = await Activity.find({
       ...dateQuery("loginTime", start, end),
-      ...(selectedIds.length ? { user: { $in: selectedIds } } : {}),
+      user: { $in: selectedIds },
     }).populate("user", "name department designation").lean();
 
     const totalLogins = activities.length;
@@ -657,7 +657,7 @@ export const getAdminAttendanceReport = async (req, res) => {
     const selectedIds = users.map((user) => user._id);
     const activities = await Activity.find({
       ...dateQuery("loginTime", start, end),
-      ...(selectedIds.length ? { user: { $in: selectedIds } } : {}),
+      user: { $in: selectedIds },
     }).populate("user", "name department").sort({ loginTime: 1 }).lean();
 
     const meetings = await Meeting.find({
@@ -897,29 +897,22 @@ export const getAdminSimpleReport = async (req, res) => {
     const activityQuery = dateQuery("loginTime", start, end);
     const meetingQuery = dateQuery("startTime", start, end);
 
-    let filterUserIds = null;
+    let filterUserIds = options.users.map((u) => u._id);
     if (req.query.department && req.query.department !== "all") {
-      filterUserIds = options.users.filter((u) => u.department === req.query.department).map((u) => u._id);
+      filterUserIds = filterUserIds.filter((id) => options.users.some((u) => asId(u._id) === asId(id) && u.department === req.query.department));
     }
     if (req.query.salesManager && req.query.salesManager !== "all") {
       const mgrUser = options.users.find((u) => asId(u._id) === req.query.salesManager);
       if (mgrUser) {
         const mgrIds = options.users.filter((u) => u.managerName === mgrUser.name || asId(u._id) === req.query.salesManager).map((u) => u._id);
-        filterUserIds = filterUserIds ? filterUserIds.filter((id) => mgrIds.some((m) => asId(m) === asId(id))) : mgrIds;
+        filterUserIds = filterUserIds.filter((id) => mgrIds.some((m) => asId(m) === asId(id)));
       }
     }
     if (req.query.employee && req.query.employee !== "all") {
-      if (filterUserIds) {
-        filterUserIds = filterUserIds.filter((id) => asId(id) === req.query.employee);
-      } else {
-        const empUser = options.users.find((u) => asId(u._id) === req.query.employee);
-        if (empUser) filterUserIds = [empUser._id];
-      }
+      filterUserIds = filterUserIds.filter((id) => asId(id) === req.query.employee);
     }
-    if (filterUserIds) {
-      activityQuery.user = { $in: filterUserIds };
-      meetingQuery.createdBy = { $in: filterUserIds };
-    }
+    activityQuery.user = { $in: filterUserIds };
+    meetingQuery.createdBy = { $in: filterUserIds };
 
     const [activities, meetings, meetingReports] = await Promise.all([
       Activity.find(activityQuery).populate("user", "name department role subRole").sort({ loginTime: -1 }).lean(),
