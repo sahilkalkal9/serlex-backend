@@ -42,6 +42,7 @@ const allowedOrigins = [
   "https://admin.serlextechnologies.com",
   "https://purchase.serlextechnologies.com",
   "https://ppc.serlextechnologies.com",
+  "http://admin.serlextechnologies.com",
   
   
 ];
@@ -63,7 +64,7 @@ app.use(express.json());
 app.get("/", (req, res) => {
   res.status(200).json({
     success: true,
-    message: "Server is running healthy!!",
+    message: "Server is running healthy",
   });
 });
 
