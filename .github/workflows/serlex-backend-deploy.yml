@@ -1,4 +1,4 @@
-name: Serlex Backend Deploy
+name: Deploy Serlex Backend
 
 on:
   push:
@@ -8,13 +8,91 @@ on:
   workflow_dispatch:
 
 jobs:
-  test:
-    name: Test GitHub Actions
+  deploy:
+    name: Deploy Backend to Enhance Server
     runs-on: ubuntu-latest
 
     steps:
-      - name: Print test message
+      - name: Checkout latest code
+        uses: actions/checkout@v4
+
+      - name: Create backend tar
         run: |
-          echo "Serlex backend workflow is working"
-          echo "Branch: ${{ github.ref }}"
-          echo "Commit: ${{ github.sha }}"
+          tar \
+            --exclude='.git' \
+            --exclude='node_modules' \
+            --exclude='*.log' \
+            --exclude='.env' \
+            --exclude='.github' \
+            -czf serlex-backend.tar.gz .
+
+      - name: Upload tar to server
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: ${{ secrets.SERVER_USER }}
+          password: ${{ secrets.SERVER_PASSWORD }}
+          port: ${{ secrets.SERVER_PORT }}
+          source: "serlex-backend.tar.gz"
+          target: "/root"
+
+      - name: Deploy backend on server
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: ${{ secrets.SERVER_USER }}
+          password: ${{ secrets.SERVER_PASSWORD }}
+          port: ${{ secrets.SERVER_PORT }}
+          script: |
+            set -e
+
+            APP_DIR="/var/www/a0973e2f-1de5-4fa0-b314-d5045219fdc2"
+            BACKUP_DIR="/root/serlex-backend-safe"
+
+            echo "Going to backend app directory..."
+            cd "$APP_DIR"
+
+            echo "Saving .env..."
+            mkdir -p "$BACKUP_DIR"
+            if [ -f ".env" ]; then
+              cp .env "$BACKUP_DIR/.env"
+            fi
+
+            echo "Stopping old backend process..."
+            pkill -f "node server.js" || true
+            pkill -f "npm start" || true
+
+            echo "Cleaning old backend files except .env..."
+            find . -mindepth 1 -maxdepth 1 ! -name ".env" -exec rm -rf {} +
+
+            echo "Extracting latest backend..."
+            cp /root/serlex-backend.tar.gz .
+            tar -xzf serlex-backend.tar.gz
+
+            echo "Restoring .env..."
+            if [ -f "$BACKUP_DIR/.env" ]; then
+              cp "$BACKUP_DIR/.env" .env
+            fi
+
+            echo "Installing dependencies..."
+            npm install
+
+            echo "Checking server.js syntax..."
+            node --check server.js
+
+            echo "Starting backend in background..."
+            nohup npm start > backend-live.log 2>&1 &
+
+            sleep 5
+
+            echo "Checking backend port..."
+            ss -ltnp | grep ':5000' || true
+
+            echo "Testing backend locally..."
+            curl -I http://localhost:5000 || true
+
+            echo "Cleaning tar files..."
+            rm -f /root/serlex-backend.tar.gz
+            rm -f serlex-backend.tar.gz
+
+            echo "Backend deployment completed."
