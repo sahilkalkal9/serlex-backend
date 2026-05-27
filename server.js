@@ -43,6 +43,7 @@ const allowedOrigins = [
   "https://purchase.serlextechnologies.com",
   "https://ppc.serlextechnologies.com",
   "http://admin.serlextechnologies.com",
+  "http://sales.serlextechnologies.com",
   
   
 ];
