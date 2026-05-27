@@ -66,9 +66,17 @@ jobs:
               cp .env "$BACKUP_DIR/.env"
             fi
 
-            echo "Stopping old backend process..."
-            pkill -f "node server.js" || true
-            pkill -f "npm start" || true
+            echo "Stopping old backend process on port 5000..."
+            if command -v fuser >/dev/null 2>&1; then
+              fuser -k 5000/tcp || true
+            else
+              OLD_PID=$(ss -ltnp 2>/dev/null | grep ':5000' | sed -n 's/.*pid=\([0-9]*\).*/\1/p' | head -1)
+              if [ -n "$OLD_PID" ]; then
+                kill "$OLD_PID" || true
+              fi
+            fi
+
+            sleep 2
 
             echo "Cleaning old backend files except .env..."
             find . -mindepth 1 -maxdepth 1 ! -name ".env" -exec rm -rf {} +
