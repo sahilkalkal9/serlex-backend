@@ -5,20 +5,8 @@ export const logoutUser = async (req, res) => {
     const userId = req.user.id;
     const { logoutLocation } = req.body;
 
-    const latestActivity = await Activity.findOne({
-      user: userId,
-      $or: [{ logoutTime: null }, { logoutTime: { $exists: false } }],
-    }).sort({ createdAt: -1 });
-
-    if (!latestActivity) {
-      return res.status(404).json({
-        success: false,
-        message: "No active session found",
-      });
-    }
-
-    latestActivity.logoutTime = new Date();
-    latestActivity.logoutLocation = {
+    const now = new Date();
+    const locationData = {
       name: logoutLocation?.name || "",
       coordinates: {
         latitude: logoutLocation?.coordinates?.latitude ?? null,
@@ -26,12 +14,21 @@ export const logoutUser = async (req, res) => {
       },
     };
 
-    await latestActivity.save();
+    const result = await Activity.updateMany(
+      { user: userId, $or: [{ logoutTime: null }, { logoutTime: { $exists: false } }] },
+      { $set: { logoutTime: now, logoutLocation: locationData } }
+    );
+
+    if (result.matchedCount === 0) {
+      return res.status(404).json({
+        success: false,
+        message: "No active session found",
+      });
+    }
 
     return res.status(200).json({
       success: true,
-      message: "Logout activity updated successfully",
-      activity: latestActivity,
+      message: `Logout activity updated for ${result.modifiedCount} session(s)`,
     });
   } catch (error) {
     console.error("Logout activity error:", error);

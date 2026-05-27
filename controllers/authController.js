@@ -96,17 +96,7 @@ export const signup = async (req, res) => {
       pin: hashedPin,
     });
 
-    await Activity.create({
-      user: user._id,
-      loginTime: new Date(),
-      loginLocation: {
-        name: signupLocation?.name || "",
-        coordinates: {
-          latitude: signupLocation?.coordinates?.latitude ?? null,
-          longitude: signupLocation?.coordinates?.longitude ?? null,
-        },
-      },
-    });
+    // Don't create Activity here — login will create it after first manual login
 
     const token = generateToken(user);
 

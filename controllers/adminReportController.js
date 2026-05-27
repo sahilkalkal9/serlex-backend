@@ -94,12 +94,17 @@ const getOptions = async () => {
 const buildSalesData = async (start, end, filters = {}) => {
   const { users, departments, salesManagers, salesUsers } = await getOptions();
 
-  // Filter actual sales managers based on filters
-  const selectedManagers = salesManagers.filter((user) => {
-    if (filters.department && filters.department !== "all" && user.department !== filters.department) return false;
-    if (filters.salesManager && filters.salesManager !== "all" && asId(user) !== filters.salesManager) return false;
-    return true;
-  });
+  // Determine relevant users based on filters
+  let selectedManagers = [];
+  if (filters.salesManager && filters.salesManager !== "all") {
+    const picked = users.find((u) => asId(u) === filters.salesManager);
+    if (picked) selectedManagers = [picked];
+  } else {
+    selectedManagers = salesManagers.filter((user) => {
+      if (filters.department && filters.department !== "all" && user.department !== filters.department) return false;
+      return true;
+    });
+  }
   const selectedManagerIds = selectedManagers.map((user) => user._id);
 
   // Build manager -> team members mapping (sales users whose managerName matches manager's name)
@@ -115,8 +120,9 @@ const buildSalesData = async (start, end, filters = {}) => {
     }
   });
   const allTeamMemberIds = [...new Set(Object.values(managerTeamMap).flat())];
-  // Include manager IDs to fetch their own targets/POs too
-  const allRelevantIds = [...new Set([...allTeamMemberIds, ...selectedManagerIds])];
+  // Include all sales users (even unassigned) + manager IDs to fetch all targets/POs
+  const allSalesUserIds = salesUsers.map(asId);
+  const allRelevantIds = [...new Set([...allTeamMemberIds, ...selectedManagerIds, ...allSalesUserIds])];
 
   const monthKeys = getMonthKeys(start, end);
   const periodKeys = monthKeys;
@@ -140,13 +146,27 @@ const buildSalesData = async (start, end, filters = {}) => {
     return { key, label: monthLabel(key), target, achieved, achievement: percent(achieved, target) };
   });
 
+  const poFields = (po) => ({
+    _id: po._id,
+    poNo: po.poNo,
+    companyName: po.companyName,
+    poValue: po.poValue,
+    poDate: po.poDate,
+    status: po.status,
+    activityStatus: po.activityStatus,
+    trackingStatus: po.trackingStatus,
+    vendorName: po.vendorName || "",
+    category: po.category || "",
+  });
+
   // Manager rows = each manager's team aggregated data + manager's own data
   const managerRows = selectedManagers.map((manager) => {
     const id = asId(manager);
     const memberIds = managerTeamMap[id] || [];
     const allIds = [...new Set([...memberIds, id])];
+    const pos = teamPos.filter((po) => allIds.includes(asId(po.createdBy)));
     const target = teamTargets.filter((t) => allIds.includes(asId(t.salesUser))).reduce((total, t) => total + Number(t.targetAmount || 0), 0);
-    const achieved = teamPos.filter((po) => allIds.includes(asId(po.createdBy))).reduce((total, po) => total + Number(po.poValue || 0), 0);
+    const achieved = pos.reduce((total, po) => total + Number(po.poValue || 0), 0);
     return {
       id,
       name: userName(manager),
@@ -156,29 +176,53 @@ const buildSalesData = async (start, end, filters = {}) => {
       achievement: percent(achieved, target),
       variance: Math.max(target - achieved, 0),
       status: achieved >= target && target > 0 ? "Achieved" : "Behind",
+      pos: pos.map(poFields),
     };
   });
 
-  // Team rows = individual team members (sales users) under each manager
-  const teamRows = selectedManagers.flatMap((manager) => {
-    const id = asId(manager);
-    const memberIds = managerTeamMap[id] || [];
-    return memberIds.map((memberId) => {
-      const user = salesUsers.find((u) => asId(u) === memberId);
-      const target = teamTargets.filter((t) => asId(t.salesUser) === memberId).reduce((total, t) => total + Number(t.targetAmount || 0), 0);
-      const achieved = teamPos.filter((po) => asId(po.createdBy) === memberId).reduce((total, po) => total + Number(po.poValue || 0), 0);
+  // Team rows = individual team members (sales users) under each manager + unassigned users
+  const mappedTeamIds = new Set(Object.values(managerTeamMap).flat());
+  const teamRows = [
+    ...selectedManagers.flatMap((manager) => {
+      const id = asId(manager);
+      const memberIds = managerTeamMap[id] || [];
+      return memberIds.map((memberId) => {
+        const user = salesUsers.find((u) => asId(u) === memberId);
+        const pos = teamPos.filter((po) => asId(po.createdBy) === memberId);
+        const target = teamTargets.filter((t) => asId(t.salesUser) === memberId).reduce((total, t) => total + Number(t.targetAmount || 0), 0);
+        const achieved = pos.reduce((total, po) => total + Number(po.poValue || 0), 0);
+        return {
+          id: memberId,
+          name: userName(user),
+          department: user?.department || "Sales",
+          managerName: manager.name,
+          target,
+          achieved,
+          achievement: percent(achieved, target),
+          variance: Math.max(target - achieved, 0),
+          pos: pos.map(poFields),
+        };
+      });
+    }),
+    // Also include unassigned sales users (not under any manager) who have data
+    ...salesUsers.filter((u) => !mappedTeamIds.has(asId(u))).map((user) => {
+      const uid = asId(user);
+      const pos = teamPos.filter((po) => asId(po.createdBy) === uid);
+      const target = teamTargets.filter((t) => asId(t.salesUser) === uid).reduce((total, t) => total + Number(t.targetAmount || 0), 0);
+      const achieved = pos.reduce((total, po) => total + Number(po.poValue || 0), 0);
       return {
-        id: memberId,
+        id: uid,
         name: userName(user),
         department: user?.department || "Sales",
-        managerName: manager.name,
+        managerName: "-",
         target,
         achieved,
         achievement: percent(achieved, target),
         variance: Math.max(target - achieved, 0),
+        pos: pos.map(poFields),
       };
-    });
-  }).filter((row) => row.target > 0 || row.achieved > 0);
+    }),
+  ].filter((row) => row.target > 0 || row.achieved > 0);
 
   // Monthly team data = same as overall monthly (team members are the data source)
   const monthlyTeam = monthly;
@@ -191,8 +235,8 @@ const buildSalesData = async (start, end, filters = {}) => {
     return { department, target, achieved, achievement: percent(achieved, target), variance: Math.max(target - achieved, 0) };
   }).filter((row) => row.target || row.achieved);
 
-  const totalTarget = sum(managerRows, "target");
-  const totalAchieved = sum(managerRows, "achieved");
+  const totalTarget = teamTargets.reduce((total, t) => total + Number(t.targetAmount || 0), 0);
+  const totalAchieved = teamPos.reduce((total, po) => total + Number(po.poValue || 0), 0);
   const avgAchievementPct = monthly.filter((m) => m.target > 0).length
     ? Math.round(monthly.filter((m) => m.target > 0).reduce((s, m) => s + m.achievement, 0) / monthly.filter((m) => m.target > 0).length)
     : 0;
