@@ -377,6 +377,7 @@ export const getAdminLoginLogoutReport = async (req, res) => {
       options,
       summary: {
         totalLogins,
+        memberLogins: uniqueUsers,
         totalLogouts,
         totalActiveHours: formatHours(totalDurationMs),
         activeUsers: uniqueUsers,
