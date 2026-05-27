@@ -38,7 +38,12 @@ const allowedOrigins = [
   "https://serlex-purchase-frontend.vercel.app",
   "https://serlex-admin-frontend.vercel.app",
   "https://serlex-ppc.vercel.app",
-  "https://sales.serlextechnologies.com"
+  "https://sales.serlextechnologies.com",
+  "https://admin.serlextechnologies.com",
+  "https://purchase.serlextechnologies.com",
+  "https://ppc.serlextechnologies.com",
+  
+  
 ];
 
 app.use(
@@ -58,7 +63,7 @@ app.use(express.json());
 app.get("/", (req, res) => {
   res.status(200).json({
     success: true,
-    message: "Server is running",
+    message: "Server is running new and healthy",
   });
 });
 
