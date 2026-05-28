@@ -383,13 +383,14 @@ export const getAdminLoginLogoutReport = async (req, res) => {
     const departmentRows = options.departments.map((department) => {
       const rows = activities.filter((activity) => activity.user?.department === department);
       const deptDuration = rows.reduce((total, activity) => total + durationMs(activity), 0);
+      const deptUsers = new Set(rows.map((activity) => asId(activity.user)));
       return {
         department,
-        totalLogins: rows.length,
+        totalLogins: deptUsers.size,
         totalLogouts: rows.filter((activity) => activity.logoutTime).length,
         activeHours: formatHours(deptDuration),
         avgSessionDuration: formatHours(rows.length ? deptDuration / rows.length : 0),
-        activeUsers: new Set(rows.map((activity) => asId(activity.user))).size,
+        activeUsers: deptUsers.size,
       };
     }).filter((row) => row.totalLogins || row.totalLogouts);
 
@@ -749,6 +750,10 @@ export const getAdminAttendanceReport = async (req, res) => {
       return getDateStr(date);
     });
 
+    const isSunday = (dateStr) => new Date(dateStr).getDay() === 0;
+    const workingDayKeys = dayKeys.filter((day) => !isSunday(day));
+    const weekOffCount = dayKeys.length - workingDayKeys.length;
+
     const employeeMap = {};
     Object.values(userDayMap).forEach((entry) => {
       const uid = entry.userId;
@@ -788,14 +793,17 @@ export const getAdminAttendanceReport = async (req, res) => {
         }
       });
 
-      totalPresent += presentCount;
-      totalPartial += partialCount;
-      totalLate += lateCount;
-      totalAbsent += absentCount;
-      totalHalfDay += halfDayCount;
+      if (!isSunday(day)) {
+        totalPresent += presentCount;
+        totalPartial += partialCount;
+        totalLate += lateCount;
+        totalAbsent += absentCount;
+        totalHalfDay += halfDayCount;
+      }
 
       return {
         label: dayLabel(new Date(day)),
+        isWeekOff: isSunday(day),
         present: percent(presentCount, users.length),
         absent: percent(absentCount, users.length),
         partial: percent(partialCount, users.length),
@@ -809,7 +817,7 @@ export const getAdminAttendanceReport = async (req, res) => {
       };
     });
 
-    const totalWorkingDays = users.length * dayKeys.length;
+    const totalWorkingDays = users.length * workingDayKeys.length;
 
     const departmentRows = options.departments
       .filter((dept) => users.some((user) => user.department === dept))
@@ -828,7 +836,7 @@ export const getAdminAttendanceReport = async (req, res) => {
           }
         }
       });
-      const totalCount = deptUsers.length * dayKeys.length;
+      const totalCount = deptUsers.length * workingDayKeys.length;
       const deptAbsent = Math.max(totalCount - deptPresent - deptPartial, 0);
       return {
         department,
@@ -850,7 +858,7 @@ export const getAdminAttendanceReport = async (req, res) => {
       let absentDays = 0;
       let halfDays = 0;
 
-      dayKeys.forEach((day) => {
+      workingDayKeys.forEach((day) => {
         const key = `${uid}_${day}`;
         const entry = userDayMap[key];
         if (entry) {
@@ -877,14 +885,14 @@ export const getAdminAttendanceReport = async (req, res) => {
         id: uid,
         name: userName(user),
         department: user.department || "-",
-        workingDays: dayKeys.length,
+        workingDays: workingDayKeys.length,
         presentDays,
         partialDays,
         absentDays,
         lateDays,
         halfDays,
         leaveDays: 0,
-        attendancePercent: percent(presentDays - halfDays * 0.5, dayKeys.length),
+        attendancePercent: percent(presentDays - halfDays * 0.5, workingDayKeys.length),
         firstLogin,
         lastLogout,
         totalMeetings: userMeetings.length,
