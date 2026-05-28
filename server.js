@@ -47,7 +47,7 @@ const allowedOrigins = [
   
   
 ];
-
+ 
 app.use(
   cors({
     origin: (origin, callback) => {
@@ -92,6 +92,8 @@ app.use("/api/purchase-team", purchaseTeamRoutes);
 app.use("/api/ppc-team", ppcTeamRoutes);
 app.use("/api/sales-targets", salesTargetRoutes);
 app.use("/api/admin", adminRoutes);
+
+
 
 
 
