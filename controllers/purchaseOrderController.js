@@ -17,15 +17,11 @@ const getDateRangeFilter = (fromDate, toDate, field = "poDate") => {
     filter[field] = {};
 
     if (fromDate) {
-      const from = new Date(fromDate);
-      from.setHours(0, 0, 0, 0);
-      filter[field].$gte = from;
+      filter[field].$gte = new Date(fromDate + "T00:00:00");
     }
 
     if (toDate) {
-      const to = new Date(toDate);
-      to.setHours(23, 59, 59, 999);
-      filter[field].$lte = to;
+      filter[field].$lte = new Date(toDate + "T23:59:59.999");
     }
   }
 

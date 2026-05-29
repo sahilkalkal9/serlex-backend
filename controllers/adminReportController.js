@@ -10,11 +10,12 @@ const monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep
 
 const getDateRange = (fromDate, toDate) => {
   const now = new Date();
-  const start = fromDate ? new Date(fromDate) : new Date(now.getFullYear(), now.getMonth(), 1);
-  const end = toDate ? new Date(toDate) : new Date(now.getFullYear(), now.getMonth() + 1, 0);
-
-  start.setHours(0, 0, 0, 0);
-  end.setHours(23, 59, 59, 999);
+  const start = fromDate
+    ? new Date(fromDate + "T00:00:00")
+    : new Date(now.getFullYear(), now.getMonth(), 1);
+  const end = toDate
+    ? new Date(toDate + "T23:59:59.999")
+    : new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999);
 
   return { start, end };
 };
@@ -969,10 +970,15 @@ export const getAdminSimpleReport = async (req, res) => {
     const [activities, meetings, meetingReports] = await Promise.all([
       Activity.find(activityQuery).populate("user", "name department role subRole").sort({ loginTime: -1 }).lean(),
       Meeting.find(meetingQuery).populate("createdBy", "name department").sort({ startTime: -1 }).lean(),
-      MeetingReport.find(dateQuery("meetingDateTime", start, end)).populate("createdBy", "name department").sort({ meetingDateTime: -1 }).lean(),
+      MeetingReport.find(dateQuery("meetingDateTime", start, end)).populate("createdBy", "name department").populate("meeting").sort({ meetingDateTime: -1 }).lean(),
     ]);
 
-    return res.json({ success: true, options, activities, meetings, meetingReports });
+    const enrichedReports = meetingReports.map((r) => {
+      if (r.meeting && typeof r.meeting === "object" && r.meeting._id) return r;
+      return r;
+    });
+
+    return res.json({ success: true, options, activities, meetings, meetingReports: enrichedReports });
   } catch (error) {
     console.error("getAdminSimpleReport error:", error);
     return res.status(500).json({ success: false, message: error.message || "Failed to load report" });

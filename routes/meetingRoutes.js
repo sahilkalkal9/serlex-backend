@@ -15,6 +15,7 @@ import {
   getPurchaseMeetings,
   getPpcMeetings,
   getCompletedLeads,
+  getMeetingByLeadId,
 } from "../controllers/meetingController.js";
 
 const router = express.Router();
@@ -71,6 +72,8 @@ router.get(
 router.get("/", protect, getMeetings);
 
 router.get("/completed-leads", protect, getCompletedLeads);
+
+router.get("/by-lead/:leadId", protect, getMeetingByLeadId);
 
 /**
  * Create meeting

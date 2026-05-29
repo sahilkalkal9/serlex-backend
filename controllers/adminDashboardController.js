@@ -8,14 +8,11 @@ import User from "../models/User.js";
 const getDateRange = (fromDate, toDate) => {
   const now = new Date();
   const start = fromDate
-    ? new Date(fromDate)
+    ? new Date(fromDate + "T00:00:00")
     : new Date(now.getFullYear(), now.getMonth(), 1);
   const end = toDate
-    ? new Date(toDate)
-    : new Date(now.getFullYear(), now.getMonth() + 1, 0);
-
-  start.setHours(0, 0, 0, 0);
-  end.setHours(23, 59, 59, 999);
+    ? new Date(toDate + "T23:59:59.999")
+    : new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999);
 
   return { start, end };
 };
@@ -32,11 +29,6 @@ export const getAdminDashboard = async (req, res) => {
       poDate: { $gte: start, $lte: end },
     };
 
-    const todayStart = new Date();
-    todayStart.setHours(0, 0, 0, 0);
-    const todayEnd = new Date();
-    todayEnd.setHours(23, 59, 59, 999);
-
     const [
       meetingsScheduled,
       meetingsConfirmed,
@@ -46,7 +38,7 @@ export const getAdminDashboard = async (req, res) => {
       recentMeetings,
       recentPOs,
       recentLogins,
-      todayActivities,
+      rangeActivities,
       totalUsers,
     ] = await Promise.all([
       Meeting.countDocuments({
@@ -84,52 +76,23 @@ export const getAdminDashboard = async (req, res) => {
         .limit(5)
         .lean(),
       Activity.find({
-        loginTime: { $gte: todayStart, $lte: todayEnd },
+        loginTime: { $gte: start, $lte: end },
       }).populate("user", "name department").lean(),
       User.countDocuments({ status: { $ne: "inactive" } }),
     ]);
 
-    const notifications = [
-      ...recentMeetings.map((meeting) => ({
-        id: String(meeting._id),
-        type: "meeting",
-        title: meeting.title || "Meeting",
-        meta: meeting.createdBy?.name || meeting.createdBy?.email || "Meeting",
-        status: meeting.approvalStatus || meeting.status || "pending",
-        time: meeting.startTime,
-      })),
-      ...recentPOs.map((po) => ({
-        id: String(po._id),
-        type: "po",
-        title: po.poNo || "Purchase Order",
-        meta: po.companyName || "PO",
-        status: po.activityStatus || po.status || "Pending",
-        time: po.poDate,
-      })),
-      ...recentLogins.map((activity) => ({
-        id: String(activity._id),
-        type: "login",
-        title: activity.user?.name || activity.user?.email || "User login",
-        meta: activity.loginLocation?.name || "Login activity",
-        status: "active",
-        time: activity.loginTime,
-      })),
-    ]
-      .sort((a, b) => new Date(b.time || 0) - new Date(a.time || 0))
-      .slice(0, 8);
-
-    const todayUserMap = {};
-    todayActivities.forEach((a) => {
+    const userMap = {};
+    rangeActivities.forEach((a) => {
       const uid = String(a.user?._id || a.user);
-      if (!todayUserMap[uid]) {
-        todayUserMap[uid] = { loginCount: 0, hasLogout: false, user: a.user };
+      if (!userMap[uid]) {
+        userMap[uid] = { loginCount: 0, hasLogout: false, user: a.user };
       }
-      todayUserMap[uid].loginCount++;
-      if (a.logoutTime) todayUserMap[uid].hasLogout = true;
+      userMap[uid].loginCount++;
+      if (a.logoutTime) userMap[uid].hasLogout = true;
     });
-    const todayPresent = Object.values(todayUserMap).filter((u) => u.hasLogout).length;
-    const todayPartial = Object.values(todayUserMap).filter((u) => !u.hasLogout).length;
-    const todayAbsent = Math.max(totalUsers - Object.keys(todayUserMap).length, 0);
+    const rangePresent = Object.values(userMap).filter((u) => u.hasLogout).length;
+    const rangePartial = Object.values(userMap).filter((u) => !u.hasLogout).length;
+    const rangeAbsent = Math.max(totalUsers - Object.keys(userMap).length, 0);
 
     return res.status(200).json({
       success: true,
@@ -144,9 +107,9 @@ export const getAdminDashboard = async (req, res) => {
         currentMonthPOs,
         activeEmployees,
         todayAttendance: {
-          present: todayPresent,
-          partial: todayPartial,
-          absent: todayAbsent,
+          present: rangePresent,
+          partial: rangePartial,
+          absent: rangeAbsent,
           total: totalUsers,
         },
       },

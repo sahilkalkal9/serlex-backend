@@ -873,3 +873,25 @@ export const getCompletedLeads = async (req, res) => {
   }
 };
 
+export const getMeetingByLeadId = async (req, res) => {
+  try {
+    const { leadId } = req.params;
+    if (!leadId) {
+      return res.status(400).json({ success: false, message: "Lead ID is required" });
+    }
+
+    const meeting = await Meeting.findOne({ leadId })
+      .populate("createdBy", "name department")
+      .lean();
+
+    if (!meeting) {
+      return res.status(404).json({ success: false, message: "Meeting not found for this lead" });
+    }
+
+    return res.json({ success: true, meeting });
+  } catch (error) {
+    console.error("getMeetingByLeadId error:", error);
+    return res.status(500).json({ success: false, message: error.message || "Failed to fetch meeting" });
+  }
+};
+

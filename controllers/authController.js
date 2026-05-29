@@ -11,6 +11,7 @@ const generateToken = (user) => {
       email: user.email,
       role: user.role,
       subRole: user.subRole || "",
+      tokenVersion: user.tokenVersion,
     },
     process.env.JWT_SECRET,
     { expiresIn: "7d" }
@@ -164,6 +165,19 @@ export const login = async (req, res) => {
       return res.status(403).json({
         success: false,
         message: "Account pending admin approval. Please contact your administrator.",
+      });
+    }
+
+    const activeSession = await Activity.findOne({
+      user: user._id,
+      logoutTime: null,
+      loginTime: { $gte: new Date(Date.now() - 24 * 60 * 60 * 1000) },
+    });
+
+    if (activeSession) {
+      return res.status(409).json({
+        success: false,
+        message: "Already logged in on another device. Please logout from there first.",
       });
     }
 
