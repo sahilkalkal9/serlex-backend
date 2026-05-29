@@ -133,8 +133,8 @@ export const getAdminUsers = async (req, res) => {
     const query =
       req.query.includeInactive === "true" ? {} : { status: { $ne: "inactive" } };
     const users = await User.find(query)
-      .select("name email employeeId mobileNumber department designation managerName territory joiningDate dob username role subRole status isApprovedByAdmin")
-      .sort({ name: 1 })
+      .select("name email employeeId mobileNumber department designation managerName territory joiningDate dob username role subRole status isApprovedByAdmin deviceId createdAt")
+      .sort({ createdAt: -1 })
       .lean();
 
     return res.status(200).json({
