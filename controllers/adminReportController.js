@@ -78,7 +78,7 @@ const getDaySeries = (start, end) => {
 
 const getOptions = async () => {
   const users = (await User.find({ status: { $ne: "inactive" } })
-    .select("name email department designation role subRole managerName")
+    .select("name email department designation role subRole managerName workingHours")
     .sort({ name: 1 })
     .lean()).filter((user) => !["admin", "superadmin"].includes(user?.role?.toLowerCase()));
   const departments = [...new Set(users.map((user) => user.department).filter(Boolean))].sort();
@@ -709,7 +709,7 @@ export const getAdminAttendanceReport = async (req, res) => {
     const meetings = await Meeting.find({
       createdBy: { $in: selectedIds },
       ...dateQuery("startTime", start, end),
-    }).select("title startTime endTime startLocation endLocation location meetingType status").lean();
+    }).select("createdBy title startTime endTime startLocation endLocation location meetingType status").lean();
 
     const dayCount = Math.max(Math.ceil((end - start) / 86400000), 1);
 
@@ -908,6 +908,7 @@ export const getAdminAttendanceReport = async (req, res) => {
         lateDays,
         halfDays,
         leaveDays: 0,
+        workingHours: user.workingHours || { startTime: "10:00", endTime: "18:00" },
         attendancePercent: percent(presentDays - halfDays * 0.5, workingDayKeys.length),
         firstLogin,
         lastLogout,

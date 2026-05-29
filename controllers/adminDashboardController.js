@@ -40,6 +40,7 @@ export const getAdminDashboard = async (req, res) => {
       recentLogins,
       rangeActivities,
       totalUsers,
+      nonAdminUsers,
     ] = await Promise.all([
       Meeting.countDocuments({
         ...meetingRangeQuery,
@@ -77,13 +78,16 @@ export const getAdminDashboard = async (req, res) => {
         .lean(),
       Activity.find({
         loginTime: { $gte: start, $lte: end },
-      }).populate("user", "name department").lean(),
+      }).populate("user", "name department role").lean(),
       User.countDocuments({ status: { $ne: "inactive" } }),
+      User.countDocuments({ status: { $ne: "inactive" }, role: { $nin: ["superadmin", "admin"] } }),
     ]);
 
     const userMap = {};
     rangeActivities.forEach((a) => {
       const uid = String(a.user?._id || a.user);
+      const role = a.user?.role;
+      if (role && ["superadmin", "admin"].includes(role)) return;
       if (!userMap[uid]) {
         userMap[uid] = { loginCount: 0, hasLogout: false, user: a.user };
       }
@@ -92,7 +96,7 @@ export const getAdminDashboard = async (req, res) => {
     });
     const rangePresent = Object.values(userMap).filter((u) => u.hasLogout).length;
     const rangePartial = Object.values(userMap).filter((u) => !u.hasLogout).length;
-    const rangeAbsent = Math.max(totalUsers - Object.keys(userMap).length, 0);
+    const rangeAbsent = Math.max(nonAdminUsers - Object.keys(userMap).length, 0);
 
     return res.status(200).json({
       success: true,
@@ -110,7 +114,7 @@ export const getAdminDashboard = async (req, res) => {
           present: rangePresent,
           partial: rangePartial,
           absent: rangeAbsent,
-          total: totalUsers,
+          total: nonAdminUsers,
         },
       },
       notifications: [],

@@ -36,6 +36,7 @@ export const signup = async (req, res) => {
       role,
       subRole,
       pin,
+      deviceId,
     } = req.body;
 
     if (
@@ -95,6 +96,7 @@ export const signup = async (req, res) => {
       subRole: role === "subadmin" ? subRole : "",
       isApprovedByAdmin: false,
       pin: hashedPin,
+      deviceId: deviceId || "",
     });
 
     // Don't create Activity here — login will create it after first manual login
@@ -134,7 +136,7 @@ export const signup = async (req, res) => {
 
 export const login = async (req, res) => {
   try {
-    const { employeeId, password, loginLocation } = req.body;
+    const { employeeId, password, loginLocation, deviceId } = req.body;
 
     if (!employeeId || !password) {
       return res.status(400).json({
@@ -168,6 +170,13 @@ export const login = async (req, res) => {
       });
     }
 
+    if (user.deviceId && deviceId && user.deviceId !== deviceId) {
+      return res.status(403).json({
+        success: false,
+        message: "This device is not recognized. Please login from your registered device.",
+      });
+    }
+
     const activeSession = await Activity.findOne({
       user: user._id,
       logoutTime: null,
@@ -179,6 +188,11 @@ export const login = async (req, res) => {
         success: false,
         message: "Already logged in on another device. Please logout from there first.",
       });
+    }
+
+    if (deviceId && !user.deviceId) {
+      user.deviceId = deviceId;
+      await user.save();
     }
 
     await Activity.create({
