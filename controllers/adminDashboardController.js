@@ -113,7 +113,7 @@ export const getAdminDashboard = async (req, res) => {
           total: totalUsers,
         },
       },
-      notifications,
+      notifications: [],
     });
   } catch (error) {
     console.error("getAdminDashboard error:", error);
