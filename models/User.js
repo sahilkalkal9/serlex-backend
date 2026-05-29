@@ -125,6 +125,11 @@ const userSchema = new mongoose.Schema(
       type: Number,
       default: 0,
     },
+
+    workingHours: {
+      startTime: { type: String, default: "10:00", trim: true },
+      endTime: { type: String, default: "18:00", trim: true },
+    },
   },
   { timestamps: true }
 );

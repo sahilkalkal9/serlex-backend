@@ -7,6 +7,7 @@ import {
   updateAdminUserStatus,
   approveAdminUser,
   getAdminHierarchy,
+  updateUserWorkingHours,
 } from "../controllers/adminDashboardController.js";
 
 import {
@@ -40,6 +41,13 @@ router.patch(
   protect,
   authorizeRoles("admin"),
   approveAdminUser
+);
+
+router.patch(
+  "/users/:id/working-hours",
+  protect,
+  authorizeRoles("admin"),
+  updateUserWorkingHours
 );
 
 // Hierarchy tree

@@ -718,13 +718,22 @@ export const getAdminAttendanceReport = async (req, res) => {
       return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
     };
 
+    const userMap = {};
+    users.forEach((u) => { userMap[asId(u)] = u; });
+
     const userDayMap = {};
     activities.forEach((activity) => {
       const uid = asId(activity.user);
       const day = getDateStr(activity.loginTime);
       const key = `${uid}_${day}`;
+      const u = userMap[uid];
+      const wh = u?.workingHours || { startTime: "10:00", endTime: "18:00" };
+      const startMins = wh.startTime.split(":").map(Number);
+      const loginMins = [new Date(activity.loginTime).getHours(), new Date(activity.loginTime).getMinutes()];
+      const isLate = loginMins[0] > startMins[0] || (loginMins[0] === startMins[0] && loginMins[1] > startMins[1]);
+
       if (!userDayMap[key]) {
-        userDayMap[key] = { userId: uid, userName: userName(activity.user), department: activity.user?.department || "-", day, loginTime: activity.loginTime, logoutTime: null, loginLocation: activity.loginLocation, logoutLocation: activity.logoutLocation, isLate: new Date(activity.loginTime).getHours() >= 10 };
+        userDayMap[key] = { userId: uid, userName: userName(activity.user), department: activity.user?.department || "-", day, loginTime: activity.loginTime, logoutTime: null, loginLocation: activity.loginLocation, logoutLocation: activity.logoutLocation, isLate };
       }
       if (activity.logoutTime && (!userDayMap[key].logoutTime || new Date(activity.logoutTime) > new Date(userDayMap[key].logoutTime))) {
         userDayMap[key].logoutTime = activity.logoutTime;
@@ -737,9 +746,15 @@ export const getAdminAttendanceReport = async (req, res) => {
 
     Object.values(userDayMap).forEach((entry) => {
       if (entry.loginTime && entry.logoutTime) {
-        const loginHour = new Date(entry.loginTime).getHours();
-        const logoutHour = new Date(entry.logoutTime).getHours();
-        entry.isHalfDay = loginHour < 10 && logoutHour < 18;
+        const u = userMap[entry.userId];
+        const wh = u?.workingHours || { startTime: "10:00", endTime: "18:00" };
+        const startMins = wh.startTime.split(":").map(Number);
+        const endMins = wh.endTime.split(":").map(Number);
+        const loginMins = [new Date(entry.loginTime).getHours(), new Date(entry.loginTime).getMinutes()];
+        const logoutMins = [new Date(entry.logoutTime).getHours(), new Date(entry.logoutTime).getMinutes()];
+        const loginBeforeStart = loginMins[0] < startMins[0] || (loginMins[0] === startMins[0] && loginMins[1] <= startMins[1]);
+        const logoutBeforeEnd = logoutMins[0] < endMins[0] || (logoutMins[0] === endMins[0] && logoutMins[1] < endMins[1]);
+        entry.isHalfDay = loginBeforeStart && logoutBeforeEnd;
       } else {
         entry.isHalfDay = false;
       }

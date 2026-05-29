@@ -547,3 +547,25 @@ export const getAdminMeetings = async (req, res) => {
 //     });
 //   }
 // };
+
+export const updateUserWorkingHours = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { startTime, endTime } = req.body;
+
+    const user = await User.findById(id);
+    if (!user) {
+      return res.status(404).json({ success: false, message: "User not found" });
+    }
+
+    if (startTime !== undefined) user.workingHours.startTime = startTime;
+    if (endTime !== undefined) user.workingHours.endTime = endTime;
+
+    await user.save();
+
+    return res.json({ success: true, user });
+  } catch (error) {
+    console.error("updateUserWorkingHours error:", error);
+    return res.status(500).json({ success: false, message: error.message || "Failed to update working hours" });
+  }
+};
