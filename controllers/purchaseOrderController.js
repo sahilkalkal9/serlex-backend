@@ -696,6 +696,7 @@ export const getMyDailyActivityOrders = async (req, res) => {
 
     const filter = {
       category: "Trading",
+      isApproved: true,
     };
 
     if (fromDate || toDate) {
