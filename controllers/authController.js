@@ -36,7 +36,6 @@ export const signup = async (req, res) => {
       role,
       subRole,
       pin,
-      deviceId,
     } = req.body;
 
     if (
@@ -96,7 +95,6 @@ export const signup = async (req, res) => {
       subRole: role === "subadmin" ? subRole : "",
       isApprovedByAdmin: false,
       pin: hashedPin,
-      deviceId: deviceId || "",
     });
 
     // Don't create Activity here — login will create it after first manual login
