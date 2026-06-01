@@ -170,7 +170,7 @@ export const login = async (req, res) => {
       });
     }
 
-    if (user.deviceId && deviceId && user.deviceId !== deviceId) {
+    if (!["superadmin", "admin"].includes(user.role) && user.deviceId && deviceId && user.deviceId !== deviceId) {
       return res.status(403).json({
         success: false,
         message: "This device is not recognized. Please login from your registered device.",
@@ -190,7 +190,7 @@ export const login = async (req, res) => {
       });
     }
 
-    if (deviceId && !user.deviceId) {
+    if (!["superadmin", "admin"].includes(user.role) && deviceId && !user.deviceId) {
       user.deviceId = deviceId;
       await user.save();
     }

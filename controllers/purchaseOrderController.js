@@ -696,20 +696,37 @@ export const getMyDailyActivityOrders = async (req, res) => {
 
     const filter = {
       category: "Trading",
-      isApproved: true,
-      ...getDateRangeFilter(fromDate, toDate, "poDate"),
     };
+
+    if (fromDate || toDate) {
+      const dateFilter = {};
+      if (fromDate) dateFilter.$gte = new Date(fromDate + "T00:00:00");
+      if (toDate) dateFilter.$lte = new Date(toDate + "T23:59:59.999");
+      filter.$or = [
+        { poDate: dateFilter },
+        { deliveryDate: dateFilter },
+      ];
+    }
 
     if (status && status !== "All") {
       filter.activityStatus = status;
     }
 
     if (search) {
-      filter.$or = [
-        { poNo: { $regex: search, $options: "i" } },
-        { companyName: { $regex: search, $options: "i" } },
-        { vendorName: { $regex: search, $options: "i" } },
-      ];
+      const searchFilter = {
+        $or: [
+          { poNo: { $regex: search, $options: "i" } },
+          { companyName: { $regex: search, $options: "i" } },
+          { vendorName: { $regex: search, $options: "i" } },
+        ],
+      };
+
+      if (filter.$or) {
+        filter.$and = [{ $or: filter.$or }, searchFilter];
+        delete filter.$or;
+      } else {
+        filter.$or = searchFilter.$or;
+      }
     }
 
     const orders = await PurchaseOrder.find(filter)
