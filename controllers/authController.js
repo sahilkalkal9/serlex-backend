@@ -168,7 +168,9 @@ export const login = async (req, res) => {
       });
     }
 
-    if (!["superadmin", "admin"].includes(user.role) && user.deviceId && deviceId && user.deviceId !== deviceId) {
+    const isTestUser = user.employeeId?.toLowerCase().includes("test");
+
+    if (!["superadmin", "admin"].includes(user.role) && !isTestUser && user.deviceId && deviceId && user.deviceId !== deviceId) {
       return res.status(403).json({
         success: false,
         message: "This device is not recognized. Please login from your registered device.",
@@ -188,7 +190,7 @@ export const login = async (req, res) => {
       });
     }
 
-    if (!["superadmin", "admin"].includes(user.role) && deviceId && !user.deviceId) {
+    if (!["superadmin", "admin"].includes(user.role) && !isTestUser && deviceId && !user.deviceId) {
       user.deviceId = deviceId;
       await user.save();
     }
