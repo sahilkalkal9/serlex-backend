@@ -1253,12 +1253,18 @@ export const updatePOTrackingOrder = async (req, res) => {
 
 export const getPurchasePlanningTrackingOrders = async (req, res) => {
   try {
-    const { fromDate, toDate, approvalStatus, search } = req.query;
+    const { fromDate, toDate, approvalStatus, search, category, vendorFilter } = req.query;
 
     const filter = {
-      category: "Trading",
       ...getDateRangeFilter(fromDate, toDate, "poDate"),
     };
+
+    // Category filter: when not provided, default to "Trading" for backward compat
+    if (category && category !== "All" && category !== "All Categories") {
+      filter.category = category;
+    } else if (!category) {
+      filter.category = "Trading";
+    }
 
     if (approvalStatus === "Approved") {
       filter.isApproved = true;
@@ -1268,16 +1274,33 @@ export const getPurchasePlanningTrackingOrders = async (req, res) => {
       filter.isApproved = false;
     }
 
+    const andConditions = [];
+
     if (search) {
-      filter.$or = [
-        { poNo: { $regex: search, $options: "i" } },
-        { companyName: { $regex: search, $options: "i" } },
-        { vendorName: { $regex: search, $options: "i" } },
-        { status: { $regex: search, $options: "i" } },
-        { activityStatus: { $regex: search, $options: "i" } },
-        { trackingStatus: { $regex: search, $options: "i" } },
-        { processingStatus: { $regex: search, $options: "i" } },
-      ];
+      andConditions.push({
+        $or: [
+          { poNo: { $regex: search, $options: "i" } },
+          { companyName: { $regex: search, $options: "i" } },
+          { vendorName: { $regex: search, $options: "i" } },
+          { status: { $regex: search, $options: "i" } },
+          { activityStatus: { $regex: search, $options: "i" } },
+          { trackingStatus: { $regex: search, $options: "i" } },
+          { processingStatus: { $regex: search, $options: "i" } },
+        ],
+      });
+    }
+
+    if (vendorFilter && vendorFilter !== "All" && vendorFilter !== "All Vendors") {
+      andConditions.push({
+        $or: [
+          { companyName: vendorFilter },
+          { vendorName: vendorFilter },
+        ],
+      });
+    }
+
+    if (andConditions.length > 0) {
+      filter.$and = andConditions;
     }
 
     const orders = await PurchaseOrder.find(filter)
