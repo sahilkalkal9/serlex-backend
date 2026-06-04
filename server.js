@@ -18,6 +18,7 @@ import purchaseTeamRoutes from "./routes/purchaseTeamRoutes.js";
 import ppcTeamRoutes from "./routes/ppcTeamRoutes.js";
 import salesTargetRoutes from "./routes/salesTargetRoutes.js";                                                                                                                                                                                                                                                                          
 import adminRoutes from "./routes/adminRoutes.js";
+import salesManagerRoutes from "./routes/salesManagerRoutes.js";
 
 
 dotenv.config();
@@ -91,6 +92,7 @@ app.use("/api/vendors", vendorRoutes);
 app.use("/api/purchase-team", purchaseTeamRoutes);
 app.use("/api/ppc-team", ppcTeamRoutes);
 app.use("/api/sales-targets", salesTargetRoutes);
+app.use("/api/sales-manager", salesManagerRoutes);
 app.use("/api/admin", adminRoutes);
 
 

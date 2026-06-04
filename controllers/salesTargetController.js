@@ -64,6 +64,31 @@ const getPeriodDateRange = (period, periodKey) => {
   return { startDate, endDate };
 };
 
+const getMonthlyKeysForQuarter = (periodKey) => {
+  const [year, quarterText] = periodKey.split("-Q");
+  const yearNum = Number(year);
+  const quarter = Number(quarterText);
+  const startMonth = (quarter - 1) * 3;
+  return Array.from({ length: 3 }, (_, i) => {
+    const m = startMonth + i + 1;
+    return `${yearNum}-${String(m).padStart(2, "0")}`;
+  });
+};
+
+const getMonthlyKeysForYear = (periodKey) => {
+  const year = Number(periodKey);
+  return Array.from({ length: 12 }, (_, i) => {
+    const m = i + 1;
+    return `${year}-${String(m).padStart(2, "0")}`;
+  });
+};
+
+const getMonthlyKeysForPeriod = (period, periodKey) => {
+  if (period === "Quarterly") return getMonthlyKeysForQuarter(periodKey);
+  if (period === "Yearly") return getMonthlyKeysForYear(periodKey);
+  return [periodKey];
+};
+
 export const upsertSalesTarget = async (req, res) => {
   try {
     if (!canAccessTargetModule(req.user)) {
@@ -221,6 +246,32 @@ export const getSalesTargetAchievementReport = async (req, res) => {
       targets.map((target) => [target.salesUser.toString(), target])
     );
 
+    let monthlyAggTargetMap = new Map();
+
+    if (period !== "Monthly") {
+      const monthlyKeys = getMonthlyKeysForPeriod(period, periodKey);
+
+      const monthlyTargets = await SalesTarget.aggregate([
+        {
+          $match: {
+            salesUser: { $in: salesUserIds },
+            period: "Monthly",
+            periodKey: { $in: monthlyKeys },
+          },
+        },
+        {
+          $group: {
+            _id: "$salesUser",
+            targetAmount: { $sum: "$targetAmount" },
+          },
+        },
+      ]);
+
+      monthlyAggTargetMap = new Map(
+        monthlyTargets.map((t) => [t._id.toString(), t.targetAmount])
+      );
+    }
+
     const achievedRows = await PurchaseOrder.aggregate([
       {
         $match: {
@@ -256,7 +307,9 @@ export const getSalesTargetAchievementReport = async (req, res) => {
       const target = targetMap.get(user._id.toString());
       const achieved = achievedMap.get(user._id.toString());
 
-      const targetAmount = Number(target?.targetAmount || 0);
+      const targetAmount = Number(
+        target?.targetAmount || monthlyAggTargetMap.get(user._id.toString()) || 0
+      );
       const achievedAmount = Number(achieved?.achievedAmount || 0);
       const achievementPercentage =
         targetAmount > 0 ? (achievedAmount / targetAmount) * 100 : 0;
@@ -413,6 +466,30 @@ export const getMySalesTargetReport = async (req, res) => {
       .populate("createdBy", "name email role subRole designation")
       .populate("updatedBy", "name email role subRole designation");
 
+    let monthlyAggTarget = 0;
+
+    if (period !== "Monthly") {
+      const monthlyKeys = getMonthlyKeysForPeriod(period, periodKey);
+
+      const monthlyTargets = await SalesTarget.aggregate([
+        {
+          $match: {
+            salesUser: new mongoose.Types.ObjectId(salesUserId),
+            period: "Monthly",
+            periodKey: { $in: monthlyKeys },
+          },
+        },
+        {
+          $group: {
+            _id: "$salesUser",
+            targetAmount: { $sum: "$targetAmount" },
+          },
+        },
+      ]);
+
+      monthlyAggTarget = Number(monthlyTargets?.[0]?.targetAmount || 0);
+    }
+
     const achievedRows = await PurchaseOrder.aggregate([
       {
         $match: {
@@ -434,7 +511,7 @@ export const getMySalesTargetReport = async (req, res) => {
 
     const achievedAmount = Number(achievedRows?.[0]?.achievedAmount || 0);
     const poCount = Number(achievedRows?.[0]?.poCount || 0);
-    const targetAmount = Number(target?.targetAmount || 0);
+    const targetAmount = Number(target?.targetAmount || monthlyAggTarget || 0);
 
     const achievementPercentage =
       targetAmount > 0 ? (achievedAmount / targetAmount) * 100 : 0;

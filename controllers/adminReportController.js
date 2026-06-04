@@ -329,6 +329,7 @@ export const getAdminLoginLogoutReport = async (req, res) => {
     const options = await getOptions();
     const selectedUsers = options.users.filter((user) => {
       if (req.query.department && req.query.department !== "all" && user.department !== req.query.department) return false;
+      if (req.query.role && req.query.role !== "all" && user.role !== req.query.role) return false;
       if (req.query.employee && req.query.employee !== "all" && asId(user) !== req.query.employee) return false;
       return true;
     });
@@ -336,7 +337,7 @@ export const getAdminLoginLogoutReport = async (req, res) => {
     const activities = await Activity.find({
       ...dateQuery("loginTime", start, end),
       user: { $in: selectedIds },
-    }).populate("user", "name department designation").lean();
+    }).sort({ _id: -1 }).populate("user", "name department designation").lean();
 
     const totalLogins = activities.length;
     const totalLogouts = activities.filter((activity) => activity.logoutTime).length;
@@ -469,6 +470,7 @@ export const getAdminMeetingAnalyticsReport = async (req, res) => {
     const { start, end } = getDateRange(req.query.fromDate, req.query.toDate);
     const options = await getOptions();
     const meetings = await Meeting.find(dateQuery("startTime", start, end))
+      .sort({ _id: -1 })
       .populate("createdBy", "name department designation")
       .lean();
     const totalMeetings = meetings.length;
@@ -651,7 +653,7 @@ export const getAdminPoReport = async (req, res) => {
       query.createdBy = { $in: ids };
     }
 
-    const purchaseOrders = await PurchaseOrder.find(query).populate("createdBy", "name department managerName").lean();
+    const purchaseOrders = await PurchaseOrder.find(query).sort({ _id: -1 }).populate("createdBy", "name department managerName").lean();
     const monthKeys = getMonthKeys(start, end);
     const received = purchaseOrders.length;
     const completed = purchaseOrders.filter((po) => ["Completed", "Payment Received"].includes(po.activityStatus) || po.status === "Completed").length;
@@ -708,6 +710,9 @@ export const getAdminAttendanceReport = async (req, res) => {
     const { start, end } = getDateRange(req.query.fromDate, req.query.toDate);
     const options = await getOptions();
     let users = options.users.filter((user) => !req.query.department || req.query.department === "all" || user.department === req.query.department);
+    if (req.query.role && req.query.role !== "all") {
+      users = users.filter((user) => user.role === req.query.role);
+    }
     if (req.query.employee && req.query.employee !== "all") {
       users = users.filter((user) => asId(user) === req.query.employee);
     }
@@ -765,8 +770,10 @@ export const getAdminAttendanceReport = async (req, res) => {
         const logoutMins = [new Date(entry.logoutTime).getHours(), new Date(entry.logoutTime).getMinutes()];
         const loginBeforeStart = loginMins[0] < startMins[0] || (loginMins[0] === startMins[0] && loginMins[1] <= startMins[1]);
         const logoutBeforeEnd = logoutMins[0] < endMins[0] || (logoutMins[0] === endMins[0] && logoutMins[1] < endMins[1]);
-        entry.isHalfDay = loginBeforeStart && logoutBeforeEnd;
+        entry.isLate = !loginBeforeStart;
+        entry.isHalfDay = logoutBeforeEnd;
       } else {
+        entry.isLate = false;
         entry.isHalfDay = false;
       }
     });
@@ -806,14 +813,11 @@ export const getAdminAttendanceReport = async (req, res) => {
         const key = `${uid}_${day}`;
         const entry = userDayMap[key];
         if (entry) {
-          const hasLogout = !!entry.logoutTime;
           const hasLoginOnSameDay = entry.loginTime && getDateStr(entry.loginTime) === day;
-          if (hasLogout) {
+          if (hasLoginOnSameDay) {
             presentCount++;
             if (entry.isLate) lateCount++;
             if (entry.isHalfDay) halfDayCount++;
-          } else if (hasLoginOnSameDay) {
-            partialCount++;
           }
         } else {
           absentCount++;
@@ -889,14 +893,11 @@ export const getAdminAttendanceReport = async (req, res) => {
         const key = `${uid}_${day}`;
         const entry = userDayMap[key];
         if (entry) {
-          const hasLogout = !!entry.logoutTime;
           const hasLoginOnSameDay = entry.loginTime && getDateStr(entry.loginTime) === day;
-          if (hasLogout) {
+          if (hasLoginOnSameDay) {
             presentDays++;
             if (entry.isLate) lateDays++;
             if (entry.isHalfDay) halfDays++;
-          } else if (hasLoginOnSameDay) {
-            partialDays++;
           }
         } else {
           absentDays++;
@@ -951,14 +952,11 @@ export const getAdminAttendanceReport = async (req, res) => {
         totalEmployees: users.length,
         totalWorkingDays,
         present: totalPresent,
-        partial: totalPartial,
-        absent: totalAbsent || Math.max(totalWorkingDays - totalPresent - totalPartial, 0),
+        absent: totalAbsent || Math.max(totalWorkingDays - totalPresent, 0),
         late: totalLate,
         halfDay: totalHalfDay,
-        leaves: totalPartial,
         overallAttendance: percent(totalPresent - totalHalfDay * 0.5, totalWorkingDays),
         totalMeetings: meetings.length,
-        meetingsWithLocation: meetings.filter((m) => m.startLocation?.lat).length,
       },
       daily,
       departmentRows,
@@ -980,6 +978,9 @@ export const getAdminSimpleReport = async (req, res) => {
     let filterUserIds = options.users.map((u) => u._id);
     if (req.query.department && req.query.department !== "all") {
       filterUserIds = filterUserIds.filter((id) => options.users.some((u) => asId(u._id) === asId(id) && u.department === req.query.department));
+    }
+    if (req.query.role && req.query.role !== "all") {
+      filterUserIds = filterUserIds.filter((id) => options.users.some((u) => asId(u._id) === asId(id) && u.role === req.query.role));
     }
     if (req.query.salesManager && req.query.salesManager !== "all") {
       const mgrUser = options.users.find((u) => asId(u._id) === req.query.salesManager);

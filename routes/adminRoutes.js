@@ -1,5 +1,6 @@
 import express from "express";
 import {
+  clearUserDevice,
   getAdminDashboard,
   getAdminMeetings,
   getAdminUsers,
@@ -48,6 +49,12 @@ router.patch(
   protect,
   authorizeRoles("admin"),
   updateUserWorkingHours
+);
+router.patch(
+  "/users/:id/clear-device",
+  protect,
+  authorizeRoles("admin"),
+  clearUserDevice
 );
 
 // Hierarchy tree

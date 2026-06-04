@@ -80,6 +80,7 @@ export const createMeetingReport = async (req, res) => {
       paymentTerms,
       leadStatus,
       expectedDealValue,
+      poValue,
       notes,
       poReceived,
       leadClosedRemark,
@@ -176,7 +177,7 @@ export const createMeetingReport = async (req, res) => {
           poNo: purchaseOrderNumber.trim(),
           companyName: companyName.trim(),
           category: category || "Trading",
-          poValue: Number(expectedDealValue || 0),
+          poValue: Number(poValue || expectedDealValue || 0),
           poDate,
           expectedDeliveryDate: poExpectedDeliveryDate || null,
           createdBy: getUserId(req),
@@ -246,19 +247,26 @@ export const getMeetingReports = async (req, res) => {
   try {
     let query = {};
 
+    if (req.query.fromDate || req.query.toDate) {
+      const dateFilter = {};
+      if (req.query.fromDate) dateFilter.$gte = new Date(req.query.fromDate);
+      if (req.query.toDate) {
+        const end = new Date(req.query.toDate);
+        end.setHours(23, 59, 59, 999);
+        dateFilter.$lte = end;
+      }
+      query.meetingDateTime = dateFilter;
+    }
+
     if (isAdminUser(req.user)) {
-      query = {};
+      // no user filter
     } else if (isSalesManager(req.user)) {
       const salesUsers = await User.find({ role: "sales_user" }).select("_id");
       const salesUserIds = salesUsers.map((user) => user._id);
 
-      query = {
-        createdBy: { $in: salesUserIds },
-      };
+      query.createdBy = { $in: salesUserIds };
     } else {
-      query = {
-        createdBy: getUserId(req),
-      };
+      query.createdBy = getUserId(req);
     }
 
     const reports = await getReportPopulateQuery(
@@ -339,7 +347,7 @@ export const getReportsByLeadId = async (req, res) => {
 
 export const getEligibleMeetingsForReport = async (req, res) => {
   try {
-    const completedMeetings = await Meeting.find({
+    let completedMeetings = await Meeting.find({
       createdBy: getUserId(req),
       status: "completed",
       hasReport: false,
@@ -348,6 +356,17 @@ export const getEligibleMeetingsForReport = async (req, res) => {
         "title personName companyName location startTime endTime status meetingType attendees leadId"
       )
       .sort({ startTime: -1 });
+
+    const closedLeadIds = await MeetingReport.distinct("leadId", {
+      leadId: { $ne: "", $exists: true },
+      leadStatus: { $in: ["converted", "lead_closed"] },
+    });
+
+    if (closedLeadIds.length > 0) {
+      completedMeetings = completedMeetings.filter(
+        (m) => !closedLeadIds.includes(m.leadId)
+      );
+    }
 
     return res.status(200).json({
       success: true,
@@ -467,6 +486,7 @@ export const updateMeetingReport = async (req, res) => {
         paymentTerms,
         leadStatus,
         expectedDealValue,
+        poValue,
         notes,
       } = req.body;
 
@@ -515,7 +535,7 @@ export const updateMeetingReport = async (req, res) => {
           poNo: purchaseOrderNumber || report.purchaseOrderNumber,
           companyName: companyName.trim(),
           category: category || "Trading",
-          poValue: Number(expectedDealValue || 0),
+          poValue: Number(poValue || expectedDealValue || report.expectedDealValue || 0),
         });
       }
     }
