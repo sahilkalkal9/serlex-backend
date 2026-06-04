@@ -168,8 +168,12 @@ export const createAdminUser = async (req, res) => {
       role,
       subRole,
       pin,
+      password,
       status,
     } = req.body;
+
+    const resolvedUsername = username || employeeId;
+    const resolvedPin = pin || password;
 
     if (
       !name ||
@@ -179,10 +183,10 @@ export const createAdminUser = async (req, res) => {
       !department ||
       !designation ||
       !joiningDate ||
-      !username ||
+      !resolvedUsername ||
       !dob ||
       !role ||
-      !pin
+      !resolvedPin
     ) {
       return res.status(400).json({
         success: false,
@@ -222,7 +226,7 @@ export const createAdminUser = async (req, res) => {
       });
     }
 
-    if (String(pin).length < 4) {
+    if (String(resolvedPin).length < 4) {
       return res.status(400).json({
         success: false,
         message: "PIN must be at least 4 characters",
@@ -233,7 +237,7 @@ export const createAdminUser = async (req, res) => {
       $or: [
         { email: email.trim().toLowerCase() },
         { employeeId: employeeId.trim() },
-        { username: username.trim() },
+        { username: resolvedUsername.trim() },
       ],
     });
 
@@ -245,7 +249,7 @@ export const createAdminUser = async (req, res) => {
     }
 
     const hashedDefaultPassword = await bcrypt.hash("123456", 10);
-    const hashedPin = await bcrypt.hash(String(pin), 10);
+    const hashedPin = await bcrypt.hash(String(resolvedPin), 10);
 
     const user = await User.create({
       name: name.trim(),
@@ -257,7 +261,7 @@ export const createAdminUser = async (req, res) => {
       managerName: managerName?.trim() || "",
       territory: territory?.trim() || "",
       joiningDate,
-      username: username.trim(),
+      username: resolvedUsername.trim(),
       dob,
       password: hashedDefaultPassword,
       role,

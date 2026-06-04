@@ -80,7 +80,7 @@ const getOptions = async () => {
   const users = (await User.find({ status: { $ne: "inactive" } })
     .select("name email department designation role subRole managerName workingHours")
     .sort({ name: 1 })
-    .lean()).filter((user) => !["admin", "superadmin"].includes(user?.role?.toLowerCase()));
+    .lean());
   const departments = [...new Set(users.map((user) => user.department).filter(Boolean))].sort();
 
   return {
