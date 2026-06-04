@@ -342,6 +342,12 @@ export const getAdminLoginLogoutReport = async (req, res) => {
     const totalLogouts = activities.filter((activity) => activity.logoutTime).length;
     const totalDurationMs = activities.reduce((total, activity) => total + durationMs(activity), 0);
     const uniqueUsers = new Set(activities.map((activity) => asId(activity.user))).size;
+    const activeUserIds = new Set(
+      activities
+        .filter((activity) => !activity.logoutTime)
+        .map((activity) => asId(activity.user))
+    );
+    const activeUsers = activeUserIds.size;
     const avgSessionMs = totalLogouts ? totalDurationMs / totalLogouts : 0;
     const daySeries = getDaySeries(start, end).map((date) => {
       const dayActivities = activities.filter((activity) => new Date(activity.loginTime).toDateString() === date.toDateString());
@@ -385,13 +391,18 @@ export const getAdminLoginLogoutReport = async (req, res) => {
       const rows = activities.filter((activity) => activity.user?.department === department);
       const deptDuration = rows.reduce((total, activity) => total + durationMs(activity), 0);
       const deptUsers = new Set(rows.map((activity) => asId(activity.user)));
+      const deptActiveUsers = new Set(
+        rows
+          .filter((activity) => !activity.logoutTime)
+          .map((activity) => asId(activity.user))
+      );
       return {
         department,
         totalLogins: deptUsers.size,
         totalLogouts: rows.filter((activity) => activity.logoutTime).length,
         activeHours: formatHours(deptDuration),
         avgSessionDuration: formatHours(rows.length ? deptDuration / rows.length : 0),
-        activeUsers: deptUsers.size,
+        activeUsers: deptActiveUsers.size,
       };
     }).filter((row) => row.totalLogins || row.totalLogouts);
 
@@ -426,7 +437,7 @@ export const getAdminLoginLogoutReport = async (req, res) => {
         memberLogins: uniqueUsers,
         totalLogouts,
         totalActiveHours: formatHours(totalDurationMs),
-        activeUsers: uniqueUsers,
+        activeUsers,
         avgSessionDuration: formatHours(avgSessionMs),
         loginSuccessRate: percent(totalLogouts, totalLogins),
         firstLoginTime,
