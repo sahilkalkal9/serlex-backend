@@ -5,6 +5,7 @@ import MeetingReport from "../models/MeetingReport.js";
 import PurchaseOrder from "../models/PurchaseOrder.js";
 import SalesTarget from "../models/SalesTarget.js";
 import User from "../models/User.js";
+import UserAllocation from "../models/UserAllocation.js";
 
 const monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
@@ -92,11 +93,176 @@ const getOptions = async () => {
   };
 };
 
-const buildSalesData = async (start, end, filters = {}) => {
+// Get allocated users for a manager using UserAllocation model
+const getAllocatedUsersForManager = async (managerId) => {
+  const allocations = await UserAllocation.find({
+    salesManager: managerId,
+    isActive: true,
+  })
+    .select("salesUser")
+    .lean();
+
+  return allocations.map((a) => asId(a.salesUser));
+};
+
+// Get manager -> team members mapping using both allocations and managerName field
+const getManagerTeamMapping = async (selectedManagers, salesUsers) => {
+  const managerTeamMap = {};
+
+  for (const manager of selectedManagers) {
+    // First, try to get allocated users
+    const allocatedUserIds = await getAllocatedUsersForManager(manager._id);
+
+    if (allocatedUserIds.length > 0) {
+      managerTeamMap[asId(manager)] = allocatedUserIds;
+    } else {
+      // Fallback to managerName field for backward compatibility
+      const mName = manager.name?.toLowerCase().trim();
+      if (mName) {
+        const members = salesUsers.filter(
+          (u) => u.managerName?.toLowerCase().trim() === mName
+        );
+        if (members.length) {
+          managerTeamMap[asId(manager)] = members.map(asId);
+        }
+      }
+    }
+  }
+
+  return managerTeamMap;
+};
+
+const buildSalesData = async (start, end, filters = {}, currentUser = null) => {
   const { users, departments, salesManagers, salesUsers } = await getOptions();
 
   // Determine relevant users based on filters
   let selectedManagers = [];
+  
+  // If current user is a sales manager, restrict to their allocated users
+  if (currentUser?.role === "subadmin" && currentUser?.subRole === "sales_manager") {
+    const currentManagerId = currentUser._id;
+    const allocatedUserIds = await getAllocatedUsersForManager(currentManagerId);
+    
+    // Restrict salesUsers to only allocated users
+    const restrictedSalesUsers = salesUsers.filter((u) =>
+      allocatedUserIds.includes(asId(u._id))
+    );
+    
+    selectedManagers = [users.find((u) => asId(u) === asId(currentManagerId))].filter(Boolean);
+    
+    // Continue with restricted data
+    const managerTeamMap = { [asId(currentManagerId)]: allocatedUserIds };
+    const selectedManagerIds = selectedManagers.map((user) => user._id);
+    const allTeamMemberIds = [...new Set(Object.values(managerTeamMap).flat())];
+    const allSalesUserIds = restrictedSalesUsers.map(asId);
+    const allRelevantIds = [...new Set([...allTeamMemberIds, ...selectedManagerIds, ...allSalesUserIds])];
+
+    const monthKeys = getMonthKeys(start, end);
+    const periodKeys = monthKeys;
+
+    const [teamTargets, teamPos] = await Promise.all([
+      allRelevantIds.length
+        ? SalesTarget.find({ period: "Monthly", periodKey: { $in: periodKeys }, salesUser: { $in: allRelevantIds } })
+            .populate("salesUser", "name department managerName").lean()
+        : Promise.resolve([]),
+      allRelevantIds.length
+        ? PurchaseOrder.find({ ...dateQuery("poDate", start, end), createdBy: { $in: allRelevantIds } })
+            .populate("createdBy", "name department managerName").lean()
+        : Promise.resolve([]),
+    ]);
+
+    const monthly = monthKeys.map((key) => {
+      const target = teamTargets.filter((item) => item.periodKey === key).reduce((total, item) => total + Number(item.targetAmount || 0), 0);
+      const achieved = teamPos.filter((po) => monthKey(po.poDate) === key).reduce((total, po) => total + Number(po.poValue || 0), 0);
+      return { key, label: monthLabel(key), target, achieved, achievement: percent(achieved, target) };
+    });
+
+    const poFields = (po) => ({
+      _id: po._id,
+      poNo: po.poNo,
+      companyName: po.companyName,
+      poValue: po.poValue,
+      poDate: po.poDate,
+      status: po.status,
+      activityStatus: po.activityStatus,
+      trackingStatus: po.trackingStatus,
+      vendorName: po.vendorName || "",
+      category: po.category || "",
+    });
+
+    const managerRows = selectedManagers.map((manager) => {
+      const id = asId(manager);
+      const memberIds = managerTeamMap[id] || [];
+      const allIds = [...new Set([...memberIds, id])];
+      const pos = teamPos.filter((po) => allIds.includes(asId(po.createdBy)));
+      const target = teamTargets.filter((t) => allIds.includes(asId(t.salesUser))).reduce((total, t) => total + Number(t.targetAmount || 0), 0);
+      const achieved = pos.reduce((total, po) => total + Number(po.poValue || 0), 0);
+      return {
+        id,
+        name: userName(manager),
+        department: manager.department || "Sales",
+        target,
+        achieved,
+        achievement: percent(achieved, target),
+        variance: Math.max(target - achieved, 0),
+        status: achieved >= target && target > 0 ? "Achieved" : "Behind",
+        pos: pos.map(poFields),
+      };
+    });
+
+    const teamRows = allTeamMemberIds.map((memberId) => {
+      const user = restrictedSalesUsers.find((u) => asId(u._id) === memberId);
+      const pos = teamPos.filter((po) => asId(po.createdBy) === memberId);
+      const target = teamTargets.filter((t) => asId(t.salesUser) === memberId).reduce((total, t) => total + Number(t.targetAmount || 0), 0);
+      const achieved = pos.reduce((total, po) => total + Number(po.poValue || 0), 0);
+      return {
+        id: memberId,
+        name: userName(user),
+        department: user?.department || "Sales",
+        managerName: selectedManagers[0]?.name || "Unknown",
+        target,
+        achieved,
+        achievement: percent(achieved, target),
+        variance: Math.max(target - achieved, 0),
+        pos: pos.map(poFields),
+      };
+    }).filter((row) => row.target > 0 || row.achieved > 0);
+
+    const monthlyTeam = monthly;
+    const departmentRows = [];
+
+    const totalTarget = teamTargets.reduce((total, t) => total + Number(t.targetAmount || 0), 0);
+    const totalAchieved = teamPos.reduce((total, po) => total + Number(po.poValue || 0), 0);
+    const avgAchievementPct = monthly.filter((m) => m.target > 0).length
+      ? Math.round(monthly.filter((m) => m.target > 0).reduce((s, m) => s + m.achievement, 0) / monthly.filter((m) => m.target > 0).length)
+      : 0;
+
+    return {
+      options: { ...(await getOptions()), salesManagers, salesUsers: restrictedSalesUsers },
+      summary: {
+        totalTarget,
+        totalAchieved,
+        variance: Math.max(totalTarget - totalAchieved, 0),
+        achievementPercent: percent(totalAchieved, totalTarget),
+        avgMonthlyAchievement: avgAchievementPct,
+        totalManagers: managerRows.length,
+        achievedManagers: managerRows.filter((r) => r.status === "Achieved").length,
+      },
+      monthly,
+      monthlyTeam,
+      quarterly: [0, 1, 2, 3].map((index) => {
+        const slice = monthly.slice(index * 3, index * 3 + 3);
+        if (!slice.length) return null;
+        const target = sum(slice, "target");
+        const achieved = sum(slice, "achieved");
+        return { label: `Q${index + 1}`, target, achieved, achievement: percent(achieved, target) };
+      }).filter(Boolean),
+      managerRows,
+      teamRows,
+      departmentRows,
+    };
+  }
+  
   if (filters.salesManager && filters.salesManager !== "all") {
     const picked = users.find((u) => asId(u) === filters.salesManager);
     if (picked) selectedManagers = [picked];
@@ -106,20 +272,10 @@ const buildSalesData = async (start, end, filters = {}) => {
       return true;
     });
   }
-  const selectedManagerIds = selectedManagers.map((user) => user._id);
 
-  // Build manager -> team members mapping (sales users whose managerName matches manager's name)
-  const managerTeamMap = {};
-  selectedManagers.forEach((manager) => {
-    const mName = manager.name?.toLowerCase().trim();
-    if (!mName) return;
-    const members = salesUsers.filter(
-      (u) => u.managerName?.toLowerCase().trim() === mName
-    );
-    if (members.length) {
-      managerTeamMap[asId(manager)] = members.map(asId);
-    }
-  });
+  // Get manager -> team members mapping using allocations (with fallback to managerName)
+  const managerTeamMap = await getManagerTeamMapping(selectedManagers, salesUsers);
+  const selectedManagerIds = selectedManagers.map((user) => user._id);
   const allTeamMemberIds = [...new Set(Object.values(managerTeamMap).flat())];
   // Include all sales users (even unassigned) + manager IDs to fetch all targets/POs
   const allSalesUserIds = salesUsers.map(asId);
@@ -313,7 +469,7 @@ export const getAdminReportsOverview = async (req, res) => {
 export const getAdminSalesReport = async (req, res) => {
   try {
     const { start, end } = getDateRange(req.query.fromDate, req.query.toDate);
-    const data = await buildSalesData(start, end, req.query);
+    const data = await buildSalesData(start, end, req.query, req.user);
     return res.json({ success: true, ...data });
   } catch (error) {
     console.error("getAdminSalesReport error:", error);
@@ -550,7 +706,7 @@ export const getAdminMeetingAnalyticsReport = async (req, res) => {
     const leads = await Lead.find(dateQuery("createdAt", start, end))
       .populate("meetingId", "title startTime endTime createdBy")
       .populate("followUps", "title startTime endTime status meetingType createdBy")
-      .sort({ createdAt: -1 })
+      .sort({ _id: -1 })
       .lean();
 
     const leadIds = leads.map((l) => l.leadId).filter(Boolean);
@@ -558,7 +714,7 @@ export const getAdminMeetingAnalyticsReport = async (req, res) => {
     const leadReports = await MeetingReport.find({ leadId: { $in: leadIds } })
       .populate("createdBy", "name")
       .populate("meeting", "title startTime endTime")
-      .sort({ meetingDateTime: -1 })
+      .sort({ _id: -1 })
       .lean();
 
     const reportsByLeadId = {};
@@ -720,7 +876,7 @@ export const getAdminAttendanceReport = async (req, res) => {
     const activities = await Activity.find({
       ...dateQuery("loginTime", start, end),
       user: { $in: selectedIds },
-    }).populate("user", "name department").sort({ loginTime: 1 }).lean();
+    }).populate("user", "name department").sort({ _id: -1 }).lean();
 
     const meetings = await Meeting.find({
       createdBy: { $in: selectedIds },
@@ -926,12 +1082,18 @@ export const getAdminAttendanceReport = async (req, res) => {
         lastLogout,
         totalMeetings: userMeetings.length,
         meetingsWithLocation: userMeetings.filter((m) => m.startLocation?.lat).length,
-        activities: (activitiesList || []).map((a) => ({
-          loginTime: a.loginTime,
-          logoutTime: a.logoutTime,
-          loginLocation: a.loginLocation,
-          logoutLocation: a.logoutLocation,
-        })),
+        activities: (activitiesList || []).map((a) => {
+          const dayKey = `${uid}_${getDateStr(a.loginTime)}`;
+          const dayEntry = userDayMap[dayKey];
+          return {
+            loginTime: a.loginTime,
+            logoutTime: a.logoutTime,
+            loginLocation: a.loginLocation,
+            logoutLocation: a.logoutLocation,
+            isLate: dayEntry?.isLate || false,
+            isHalfDay: dayEntry?.isHalfDay || false,
+          };
+        }),
         meetings: userMeetings.map((m) => ({
           title: m.title,
           startTime: m.startTime,
@@ -996,9 +1158,9 @@ export const getAdminSimpleReport = async (req, res) => {
     meetingQuery.createdBy = { $in: filterUserIds };
 
     const [activities, meetings, meetingReports] = await Promise.all([
-      Activity.find(activityQuery).populate("user", "name department role subRole").sort({ loginTime: -1 }).lean(),
-      Meeting.find(meetingQuery).populate("createdBy", "name department").sort({ startTime: -1 }).lean(),
-      MeetingReport.find(dateQuery("meetingDateTime", start, end)).populate("createdBy", "name department").populate("meeting").sort({ meetingDateTime: -1 }).lean(),
+      Activity.find(activityQuery).populate("user", "name department role subRole").sort({ _id: -1 }).lean(),
+      Meeting.find(meetingQuery).populate("createdBy", "name department").sort({ _id: -1 }).lean(),
+      MeetingReport.find(dateQuery("meetingDateTime", start, end)).populate("createdBy", "name department").populate("meeting").sort({ _id: -1 }).lean(),
     ]);
 
     const enrichedReports = meetingReports.map((r) => {
@@ -1010,5 +1172,33 @@ export const getAdminSimpleReport = async (req, res) => {
   } catch (error) {
     console.error("getAdminSimpleReport error:", error);
     return res.status(500).json({ success: false, message: error.message || "Failed to load report" });
+  }
+};
+
+// Get allocated users for a sales manager
+export const getSalesManagerAllocatedUsers = async (req, res) => {
+  try {
+    const managerId = req.user._id;
+
+    const allocations = await UserAllocation.find({
+      salesManager: managerId,
+      isActive: true,
+    })
+      .populate("salesUser", "name email employeeId designation department")
+      .sort({ _id: -1 });
+
+    const users = allocations.map((a) => a.salesUser);
+
+    return res.status(200).json({
+      success: true,
+      count: users.length,
+      users,
+    });
+  } catch (error) {
+    console.error("getSalesManagerAllocatedUsers error:", error);
+    return res.status(500).json({
+      success: false,
+      message: error.message || "Failed to fetch allocated users",
+    });
   }
 };

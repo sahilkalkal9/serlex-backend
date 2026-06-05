@@ -3,7 +3,7 @@ import User from "../models/User.js";
 
 const generateEmployeeId = async () => {
   const lastUser = await User.findOne({ role: "purchase_user" })
-    .sort({ createdAt: -1 })
+    .sort({ _id: -1 })
     .select("employeeId");
 
   if (!lastUser?.employeeId) return "PU0001";
@@ -16,7 +16,7 @@ export const getPurchaseTeamMembers = async (req, res) => {
   try {
     const users = await User.find({ role: "purchase_user" })
       .select("-password")
-      .sort({ createdAt: -1 });
+      .sort({ _id: -1 });
 
     return res.status(200).json({
       success: true,

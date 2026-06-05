@@ -55,7 +55,7 @@ export const getPurchaseUsersMeetings = async (req, res) => {
         "createdBy",
         "name email employeeId mobileNumber department designation role status"
       )
-      .sort({ startTime: 1 });
+      .sort({ _id: -1 });
 
     return res.status(200).json({
       success: true,

@@ -43,9 +43,7 @@ export const getMyActivities = async (req, res) => {
   try {
     const userId = req.user.id;
 
-    const activities = await Activity.find({ user: userId }).sort({
-      createdAt: -1,
-    });
+    const activities = await Activity.find({ user: userId }).sort({ _id: -1 });
 
     return res.status(200).json({
       success: true,
@@ -64,7 +62,7 @@ export const getAllActivities = async (req, res) => {
   try {
     const activities = await Activity.find()
       .populate("user", "name email employeeId role")
-      .sort({ createdAt: -1 });
+      .sort({ _id: -1 });
 
     return res.status(200).json({
       success: true,

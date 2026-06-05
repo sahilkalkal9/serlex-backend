@@ -61,19 +61,19 @@ export const getAdminDashboard = async (req, res) => {
       Meeting.find(meetingRangeQuery)
         .select("title startTime status approvalStatus createdBy")
         .populate("createdBy", "name email role subRole")
-        .sort({ updatedAt: -1 })
+        .sort({ _id: -1 })
         .limit(5)
         .lean(),
       PurchaseOrder.find(poRangeQuery)
         .select("poNo companyName status activityStatus poDate")
-        .sort({ updatedAt: -1 })
+        .sort({ _id: -1 })
         .limit(5)
         .lean(),
       Activity.find({
         loginTime: { $gte: start, $lte: end },
       })
         .populate("user", "name email role subRole")
-        .sort({ loginTime: -1 })
+        .sort({ _id: -1 })
         .limit(5)
         .lean(),
       Activity.find({
@@ -134,7 +134,7 @@ export const getAdminUsers = async (req, res) => {
       req.query.includeInactive === "true" ? {} : { status: { $ne: "inactive" } };
     const users = await User.find(query)
       .select("name email employeeId mobileNumber department designation managerName territory joiningDate dob username role subRole status isApprovedByAdmin deviceId createdAt")
-      .sort({ createdAt: -1 })
+      .sort({ _id: -1 })
       .lean();
 
     return res.status(200).json({
@@ -469,7 +469,7 @@ export const getAdminMeetings = async (req, res) => {
       .populate("createdBy", "name email employeeId department designation role subRole")
       .populate("cancelledBy", "name email")
       .populate("attendeeResponses.respondedBy", "name email")
-      .sort({ startTime: 1 })
+      .sort({ _id: -1 })
       .lean();
 
     const meetingIds = meetings.filter(m => m._id).map(m => m._id);

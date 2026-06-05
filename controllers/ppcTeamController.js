@@ -5,7 +5,7 @@ export const getPpcMembers = async (req, res) => {
   try {
     const users = await User.find({ role: "ppc_user" })
       .select("-password")
-      .sort({ createdAt: -1 });
+      .sort({ _id: -1 });
 
     res.status(200).json({ success: true, users });
   } catch (error) {
@@ -114,7 +114,7 @@ export const getPpcTeamMeetings = async (req, res) => {
 
     const meetings = await Meeting.find(query)
       .populate("createdBy", "name email employeeId mobileNumber designation role")
-      .sort({ startTime: 1 });
+      .sort({ _id: -1 });
 
     res.status(200).json({
       success: true,

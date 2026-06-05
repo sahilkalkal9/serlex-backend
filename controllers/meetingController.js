@@ -2,6 +2,7 @@ import { google } from "googleapis";
 import Meeting from "../models/Meeting.js";
 import Lead from "../models/Lead.js";
 import User from "../models/User.js";
+import MeetingReport from "../models/MeetingReport.js";
 import { getAuthorizedOAuthClient } from "../utils/googleClient.js";
 
 const normalizeAttendees = (attendees = []) => {
@@ -104,7 +105,7 @@ export const getSalesUsersMeetings = async (req, res) => {
 
     const meetings = await populateMeetingQuery(
       Meeting.find(query)
-    ).sort({ startTime: 1 });
+    ).sort({ _id: -1 });
 
     return res.status(200).json({
       success: true,
@@ -752,7 +753,7 @@ export const getPurchaseMeetings = async (req, res) => {
 
     const meetings = await populateMeetingQuery(
       Meeting.find(query)
-    ).sort({ startTime: 1 });
+    ).sort({ _id: -1 });
 
     return res.status(200).json({
       success: true,
@@ -824,7 +825,7 @@ export const getPpcMeetings = async (req, res) => {
 
     const meetings = await populateMeetingQuery(
       Meeting.find(query)
-    ).sort({ startTime: 1 });
+    ).sort({ _id: -1 });
 
     return res.status(200).json({
       success: true,
@@ -842,11 +843,17 @@ export const getPpcMeetings = async (req, res) => {
 
 export const getCompletedLeads = async (req, res) => {
   try {
+    const closedLeadIds = await MeetingReport.distinct("leadId", {
+      leadId: { $ne: "", $exists: true },
+      leadStatus: { $in: ["converted", "lead_closed"] },
+    });
+
     const meetings = await Meeting.find({
       createdBy: req.user.id,
       status: "completed",
       meetingType: "client",
       leadId: { $ne: "", $exists: true },
+      leadId: { $nin: closedLeadIds },
     })
       .select("leadId companyName personName title startTime")
       .sort({ _id: -1 })

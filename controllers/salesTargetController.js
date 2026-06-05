@@ -412,7 +412,7 @@ export const getSalesTargetPODetails = async (req, res) => {
       },
     })
       .select("poNo companyName category poValue poDate status trackingStatus")
-      .sort({ poDate: -1 });
+      .sort({ _id: -1 });
 
     return res.status(200).json({
       success: true,
@@ -597,7 +597,7 @@ export const getMySalesTargetPODetails = async (req, res) => {
       .select(
         "poNo companyName category poValue poDate status trackingStatus expectedDeliveryDate deliveryDate"
       )
-      .sort({ poDate: -1 });
+      .sort({ _id: -1 });
 
     return res.status(200).json({
       success: true,

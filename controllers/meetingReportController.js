@@ -148,6 +148,7 @@ export const createMeetingReport = async (req, res) => {
     if (reportType === "team") {
       reportPayload.meetingPoints = meetingPoints.trim();
       reportPayload.notes = notes || "";
+      reportPayload.meetingDateTime = meeting?.startTime || new Date();
     } else {
       reportPayload.leadId = leadId || "";
       reportPayload.companyName = companyName.trim();
@@ -271,7 +272,7 @@ export const getMeetingReports = async (req, res) => {
 
     const reports = await getReportPopulateQuery(
       MeetingReport.find(query)
-    ).sort({ createdAt: -1 });
+    ).sort({ _id: -1 });
 
     return res.status(200).json({
       success: true,
@@ -329,7 +330,7 @@ export const getReportsByLeadId = async (req, res) => {
 
     const reports = await getReportPopulateQuery(
       MeetingReport.find({ leadId: leadId.trim() })
-    ).sort({ createdAt: -1 });
+    ).sort({ _id: -1 });
 
     return res.status(200).json({
       success: true,
@@ -355,7 +356,7 @@ export const getEligibleMeetingsForReport = async (req, res) => {
       .select(
         "title personName companyName location startTime endTime status meetingType attendees leadId"
       )
-      .sort({ startTime: -1 });
+      .sort({ _id: -1 });
 
     const closedLeadIds = await MeetingReport.distinct("leadId", {
       leadId: { $ne: "", $exists: true },

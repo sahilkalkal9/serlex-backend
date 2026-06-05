@@ -4,6 +4,8 @@ import dotenv from "dotenv";
 import cors from "cors";
 import cron from "node-cron";
 import axios from "axios";
+import { createServer } from "http";
+import { initializeSocket } from "./socket.js";
 
 import authRoutes from "./routes/authRoutes.js";
 import activityRoutes from "./routes/activityRoutes.js";
@@ -16,7 +18,8 @@ import leadRoutes from "./routes/leadRoutes.js";
 import vendorRoutes from "./routes/vendorRoutes.js";
 import purchaseTeamRoutes from "./routes/purchaseTeamRoutes.js";
 import ppcTeamRoutes from "./routes/ppcTeamRoutes.js";
-import salesTargetRoutes from "./routes/salesTargetRoutes.js";                                                                                                                                                                                                                                                                          
+import salesTargetRoutes from "./routes/salesTargetRoutes.js";
+import userAllocationRoutes from "./routes/userAllocationRoutes.js";
 import adminRoutes from "./routes/adminRoutes.js";
 import salesManagerRoutes from "./routes/salesManagerRoutes.js";
 
@@ -24,6 +27,7 @@ import salesManagerRoutes from "./routes/salesManagerRoutes.js";
 dotenv.config();
 
 const app = express();
+const httpServer = createServer(app);
 const PORT = process.env.PORT || 5000;
 
 const allowedOrigins = [
@@ -66,7 +70,7 @@ app.use(express.json());
 app.get("/", (req, res) => {
   res.status(200).json({
     success: true,
-    message: "Server is running healthy",
+    message: "Server is running healthy##",
   });
 });
 
@@ -92,6 +96,7 @@ app.use("/api/vendors", vendorRoutes);
 app.use("/api/purchase-team", purchaseTeamRoutes);
 app.use("/api/ppc-team", ppcTeamRoutes);
 app.use("/api/sales-targets", salesTargetRoutes);
+app.use("/api/user-allocations", userAllocationRoutes);
 app.use("/api/sales-manager", salesManagerRoutes);
 app.use("/api/admin", adminRoutes);
 
@@ -158,9 +163,10 @@ mongoose
   .then(() => {
     console.log("✅ MongoDB connected successfully");
 
-    app.listen(PORT, "0.0.0.0", () => {
+    initializeSocket(httpServer);
+
+    httpServer.listen(PORT, "0.0.0.0", () => {
       console.log(`🚀 Server running on port ${PORT}`);
-      // startSelfPingCron();
     });
   })
   .catch((error) => {

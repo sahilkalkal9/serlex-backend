@@ -21,7 +21,7 @@ export const getSalesUsers = async (req, res) => {
 
     const users = await User.find(query)
       .select("-password")
-      .sort({ createdAt: -1 });
+      .sort({ _id: -1 });
 
     return res.status(200).json({
       success: true,

@@ -354,7 +354,7 @@ export const getPurchaseDashboard = async (req, res) => {
       }
     }
 
-    const orders = await PurchaseOrder.find(filter).sort({ poDate: -1 });
+    const orders = await PurchaseOrder.find(filter).sort({ _id: -1 });
 
     const totalPOReceived = orders.length;
 
@@ -449,7 +449,7 @@ export const getNewPurchaseOrders = async (req, res) => {
       ...getDateRangeFilter(fromDate, toDate, "poDate"),
     };
 
-    const orders = await PurchaseOrder.find(filter).sort({ poDate: -1 });
+    const orders = await PurchaseOrder.find(filter).sort({ _id: -1 });
 
     const totalValue = orders.reduce(
       (sum, order) => sum + Number(order.poValue || 0),
@@ -511,7 +511,7 @@ export const getProcessingPurchaseOrders = async (req, res) => {
       .populate("approvedBy", "name email designation")
       .populate("processedBy", "name email designation")
       .populate("createdBy", "name email designation")
-      .sort({ poDate: -1 });
+      .sort({ _id: -1 });
 
     return res.status(200).json({
       success: true,
@@ -598,7 +598,7 @@ export const getApprovedPurchaseOrders = async (req, res) => {
       .populate("processedBy", "name email designation role subRole")
       .populate("createdBy", "name email designation role subRole")
       .populate("statusLogs.updatedBy", "name email designation role subRole")
-      .sort({ poDate: -1 });
+      .sort({ _id: -1 });
 
     const totalValue = orders.reduce(
       (sum, order) => sum + Number(order.poValue || 0),
@@ -734,7 +734,7 @@ export const getMyDailyActivityOrders = async (req, res) => {
       .populate("createdBy", "name email designation role subRole")
       .populate("approvedBy", "name email designation role subRole")
       .populate("statusLogs.updatedBy", "name email designation role subRole")
-      .sort({ poDate: -1 });
+      .sort({ _id: -1 });
 
     const rows = orders
       .map((order) => {
@@ -1095,7 +1095,7 @@ export const getPOTrackingOrders = async (req, res) => {
       ];
     }
 
-    const orders = await PurchaseOrder.find(filter).sort({ poDate: -1 });
+    const orders = await PurchaseOrder.find(filter).sort({ _id: -1 });
 
     const rows = orders.map((order) => {
       const delayInfo = getTrackingDelayInfo(order);
@@ -1308,7 +1308,7 @@ export const getPurchasePlanningTrackingOrders = async (req, res) => {
       .populate("processedBy", "name email designation role subRole")
       .populate("createdBy", "name email designation role subRole")
       .populate("statusLogs.updatedBy", "name email designation role subRole")
-      .sort({ poDate: -1 });
+      .sort({ _id: -1 });
 
     const totalTradingPOs = orders.length;
     const approvedPOs = orders.filter((order) => order.isApproved).length;
@@ -1829,7 +1829,7 @@ export const getSalesManagerPOTrackingOrders = async (req, res) => {
       .populate("processedBy", "name email designation role subRole")
       .populate("createdBy", "name email designation role subRole")
       .populate("statusLogs.updatedBy", "name email designation role subRole")
-      .sort({ poDate: -1 });
+      .sort({ _id: -1 });
 
     const rows = orders.map((order) => {
       const statusLogs = Array.isArray(order.statusLogs)

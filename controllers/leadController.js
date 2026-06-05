@@ -52,7 +52,7 @@ export const getSalesManagerLeads = async (req, res) => {
     const leads = await populateLeadQuery(
       Lead.find({})
     )
-      .sort({ updatedAt: -1, createdAt: -1 })
+      .sort({ _id: -1 })
       .lean();
 
     const leadIds = leads.map((lead) => lead.leadId).filter(Boolean);
@@ -70,7 +70,7 @@ export const getSalesManagerLeads = async (req, res) => {
         "purchaseOrder",
         "poNo companyName category poValue poDate expectedDeliveryDate deliveryDate status isApproved approvedBy approvedDate approvalRemarks activityStatus processingStatus processedBy processedDate processingRemarks trackingStatus vendorName paymentReceivedDate trackingRemarks remarks statusLogs createdBy createdAt updatedAt"
       )
-      .sort({ meetingDateTime: -1, createdAt: -1 })
+      .sort({ _id: -1 })
       .lean();
 
     const poNumbers = [

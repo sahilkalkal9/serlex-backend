@@ -68,7 +68,7 @@ export const getVendors = async (req, res) => {
       filter.createdAt = { $gte: from, $lte: to };
     }
 
-    const vendors = await Vendor.find(filter).sort({ createdAt: -1 });
+    const vendors = await Vendor.find(filter).sort({ _id: -1 });
 
     res.status(200).json({
       success: true,

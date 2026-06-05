@@ -183,7 +183,7 @@ export const login = async (req, res) => {
       loginTime: { $gte: new Date(Date.now() - 24 * 60 * 60 * 1000) },
     });
 
-    if (activeSession) {
+    if (activeSession && !isTestUser) {
       return res.status(409).json({
         success: false,
         message: "Already logged in on another device. Please logout from there first.",
@@ -275,7 +275,7 @@ export const getPurchaseTeamUsers = async (req, res) => {
       ],
     })
       .select("-password")
-      .sort({ createdAt: -1 });
+      .sort({ _id: -1 });
 
     return res.status(200).json({
       success: true,
@@ -300,7 +300,7 @@ export const getPpcTeamUsers = async (req, res) => {
       ],
     })
       .select("-password")
-      .sort({ createdAt: -1 });
+      .sort({ _id: -1 });
 
     return res.status(200).json({
       success: true,
