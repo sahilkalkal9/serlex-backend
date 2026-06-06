@@ -1,6 +1,7 @@
 import mongoose from "mongoose";
 import SalesTarget from "../models/SalesTarget.js";
 import User from "../models/User.js";
+import UserAllocation from "../models/UserAllocation.js";
 import PurchaseOrder from "../models/PurchaseOrder.js";
 
 const isSalesManager = (user) => {
@@ -211,10 +212,40 @@ export const getSalesTargetAchievementReport = async (req, res) => {
       });
     }
 
+    // For sales managers, only show allocated team members
+    let allowedUserIds = null;
+    if (isSalesManager(req.user)) {
+      const managerId = req.user.id || req.user._id;
+      const allocations = await UserAllocation.find({
+        salesManager: managerId,
+        isActive: true,
+      }).select("salesUser");
+      allowedUserIds = allocations.map((a) => a.salesUser);
+      if (allowedUserIds.length === 0) {
+        return res.status(200).json({
+          success: true,
+          rows: [],
+          cards: {
+            totalMembers: 0,
+            totalTarget: 0,
+            totalAchieved: 0,
+            totalPOs: 0,
+            achievementPercentage: 0,
+            formattedTotalTarget: "₹ 0",
+            formattedTotalAchieved: "₹ 0",
+          },
+        });
+      }
+    }
+
     const userQuery = {
       role: "sales_user",
       status: { $ne: "inactive" },
     };
+
+    if (allowedUserIds) {
+      userQuery._id = { $in: allowedUserIds };
+    }
 
     if (salesUserId && salesUserId !== "all") {
       userQuery._id = salesUserId;
@@ -250,6 +281,7 @@ export const getSalesTargetAchievementReport = async (req, res) => {
 
     if (period !== "Monthly") {
       const monthlyKeys = getMonthlyKeysForPeriod(period, periodKey);
+      const totalMonths = monthlyKeys.length;
 
       const monthlyTargets = await SalesTarget.aggregate([
         {
@@ -263,12 +295,16 @@ export const getSalesTargetAchievementReport = async (req, res) => {
           $group: {
             _id: "$salesUser",
             targetAmount: { $sum: "$targetAmount" },
+            monthCount: { $sum: 1 },
           },
         },
       ]);
 
       monthlyAggTargetMap = new Map(
-        monthlyTargets.map((t) => [t._id.toString(), t.targetAmount])
+        monthlyTargets.map((t) => [
+          t._id.toString(),
+          Math.round((t.targetAmount / t.monthCount) * totalMonths),
+        ])
       );
     }
 
@@ -470,6 +506,7 @@ export const getMySalesTargetReport = async (req, res) => {
 
     if (period !== "Monthly") {
       const monthlyKeys = getMonthlyKeysForPeriod(period, periodKey);
+      const totalMonths = monthlyKeys.length;
 
       const monthlyTargets = await SalesTarget.aggregate([
         {
@@ -483,11 +520,14 @@ export const getMySalesTargetReport = async (req, res) => {
           $group: {
             _id: "$salesUser",
             targetAmount: { $sum: "$targetAmount" },
+            monthCount: { $sum: 1 },
           },
         },
       ]);
 
-      monthlyAggTarget = Number(monthlyTargets?.[0]?.targetAmount || 0);
+      const sum = Number(monthlyTargets?.[0]?.targetAmount || 0);
+      const filledCount = Number(monthlyTargets?.[0]?.monthCount || 0);
+      monthlyAggTarget = filledCount > 0 ? Math.round((sum / filledCount) * totalMonths) : 0;
     }
 
     const achievedRows = await PurchaseOrder.aggregate([

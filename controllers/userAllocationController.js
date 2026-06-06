@@ -1,6 +1,8 @@
+import mongoose from "mongoose";
 import User from "../models/User.js";
 import UserAllocation from "../models/UserAllocation.js";
 import SalesTarget from "../models/SalesTarget.js";
+import ManagerTarget from "../models/ManagerTarget.js";
 
 const isAdmin = (user) => {
   return ["admin", "superadmin"].includes(user?.role);
@@ -238,7 +240,59 @@ export const getAllocationStatusForUser = async (req, res) => {
   }
 };
 
-// Get all sales managers with their allocated users
+const getMonthlyKeysForQuarter = (periodKey) => {
+  const [year, quarterText] = periodKey.split("-Q");
+  const yearNum = Number(year);
+  const quarter = Number(quarterText);
+  const startMonth = (quarter - 1) * 3;
+  return Array.from({ length: 3 }, (_, i) => {
+    const m = startMonth + i + 1;
+    return `${yearNum}-${String(m).padStart(2, "0")}`;
+  });
+};
+
+const getMonthlyKeysForYear = (periodKey) => {
+  const year = Number(periodKey);
+  return Array.from({ length: 12 }, (_, i) => {
+    const m = i + 1;
+    return `${year}-${String(m).padStart(2, "0")}`;
+  });
+};
+
+const getMonthlyKeysForPeriod = (period, periodKey) => {
+  if (period === "Quarterly") return getMonthlyKeysForQuarter(periodKey);
+  if (period === "Yearly") return getMonthlyKeysForYear(periodKey);
+  return [periodKey];
+};
+
+const getPeriodDateRange = (period, periodKey) => {
+  let startDate;
+  let endDate;
+
+  if (period === "Monthly") {
+    const [year, month] = periodKey.split("-").map(Number);
+    startDate = new Date(year, month - 1, 1);
+    endDate = new Date(year, month, 0);
+  } else if (period === "Quarterly") {
+    const [yearText, quarterText] = periodKey.split("-Q");
+    const year = Number(yearText);
+    const quarter = Number(quarterText);
+    const startMonth = (quarter - 1) * 3;
+    startDate = new Date(year, startMonth, 1);
+    endDate = new Date(year, startMonth + 3, 0);
+  } else if (period === "Yearly") {
+    const year = Number(periodKey);
+    startDate = new Date(year, 0, 1);
+    endDate = new Date(year, 11, 31);
+  }
+
+  if (!startDate || !endDate) return null;
+  startDate.setHours(0, 0, 0, 0);
+  endDate.setHours(23, 59, 59, 999);
+  return { startDate, endDate };
+};
+
+// Get all sales managers with their allocated users and targets
 export const getManagersWithAllocations = async (req, res) => {
   try {
     if (!isAdmin(req.user)) {
@@ -248,11 +302,16 @@ export const getManagersWithAllocations = async (req, res) => {
       });
     }
 
+    const { period = "Monthly", periodKey } = req.query;
+
     // Get all sales managers
     const managers = await User.find({
       role: "subadmin",
       subRole: "sales_manager",
     }).select("name email employeeId designation department");
+
+    const { default: PurchaseOrder } = await import("../models/PurchaseOrder.js");
+    const dateRange = period && periodKey ? getPeriodDateRange(period, periodKey) : null;
 
     // Get allocations for each manager
     const managersWithAllocations = await Promise.all(
@@ -262,10 +321,123 @@ export const getManagersWithAllocations = async (req, res) => {
           isActive: true,
         }).populate("salesUser", "name email employeeId designation");
 
+        let target = null;
+        if (period && periodKey) {
+          target = await ManagerTarget.findOne({
+            manager: manager._id,
+            period,
+            periodKey,
+          }).select("targetAmount period periodKey remarks");
+
+          // If no direct quarterly/yearly target, aggregate from monthly targets
+          if (!target && period !== "Monthly") {
+            const monthlyKeys = getMonthlyKeysForPeriod(period, periodKey);
+            const monthlyTargets = await ManagerTarget.find({
+              manager: manager._id,
+              period: "Monthly",
+              periodKey: { $in: monthlyKeys },
+            }).select("targetAmount periodKey");
+            const totalMonths = monthlyKeys.length;
+            const filledCount = monthlyTargets.length;
+            if (filledCount > 0) {
+              const sum = monthlyTargets.reduce((s, t) => s + (Number(t.targetAmount) || 0), 0);
+              const projectedAmount = Math.round((sum / filledCount) * totalMonths);
+              target = {
+                _id: null,
+                targetAmount: projectedAmount,
+                period,
+                periodKey,
+                remarks: `Projected from ${filledCount}/${totalMonths} monthly target(s)`,
+              };
+            }
+          }
+        }
+
+        // Compute PO-based achievement for this manager + team
+        let achievedAmount = 0;
+        let personalAchieved = 0;
+        let teamAchieved = 0;
+        let userAchievementMap = new Map();
+
+        if (dateRange) {
+          const allocatedUserIds = allocations
+            .map((a) => a.salesUser?._id)
+            .filter(Boolean);
+
+          // Manager's own POs (personal contribution)
+          const personalResult = await PurchaseOrder.aggregate([
+            {
+              $match: {
+                createdBy: new mongoose.Types.ObjectId(manager._id),
+                poDate: { $gte: dateRange.startDate, $lte: dateRange.endDate },
+              },
+            },
+            { $group: { _id: null, total: { $sum: "$poValue" } } },
+          ]);
+          personalAchieved = Number(personalResult?.[0]?.total || 0);
+
+          // Team POs — group by user to get per-user achievement
+          if (allocatedUserIds.length > 0) {
+            const teamResult = await PurchaseOrder.aggregate([
+              {
+                $match: {
+                  createdBy: { $in: allocatedUserIds.map((id) => new mongoose.Types.ObjectId(id)) },
+                  poDate: { $gte: dateRange.startDate, $lte: dateRange.endDate },
+                },
+              },
+              {
+                $group: {
+                  _id: "$createdBy",
+                  amount: { $sum: "$poValue" },
+                  count: { $sum: 1 },
+                },
+              },
+            ]);
+
+            teamAchieved = teamResult.reduce((sum, r) => sum + (Number(r.amount) || 0), 0);
+            teamResult.forEach((r) => {
+              userAchievementMap.set(r._id.toString(), {
+                achievedAmount: Number(r.amount) || 0,
+                poCount: Number(r.count) || 0,
+              });
+            });
+          }
+
+          achievedAmount = personalAchieved + teamAchieved;
+        }
+
+        // Attach per-user achievement to each allocated user
+        const allocatedUsersWithAchievement = allocations.map((allocation) => {
+          const allocObj = allocation.toObject ? allocation.toObject() : { ...allocation };
+          const userId = allocation.salesUser?._id?.toString();
+          const achievement = userAchievementMap.get(userId);
+          return {
+            ...allocObj,
+            achievedAmount: achievement?.achievedAmount || 0,
+            poCount: achievement?.poCount || 0,
+          };
+        });
+
+        const targetAmount = Number(target?.targetAmount || 0);
+        const achievementPercentage = targetAmount > 0 ? (achievedAmount / targetAmount) * 100 : 0;
+
         return {
           ...manager.toObject(),
-          allocatedUsers: allocations,
+          allocatedUsers: allocatedUsersWithAchievement,
           allocatedCount: allocations.length,
+          target: target
+            ? {
+                _id: target._id,
+                targetAmount,
+                period: target.period,
+                periodKey: target.periodKey,
+                remarks: target.remarks,
+                achievedAmount,
+                personalAchieved,
+                teamAchieved,
+                achievementPercentage,
+              }
+            : null,
         };
       })
     );

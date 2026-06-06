@@ -22,6 +22,7 @@ import salesTargetRoutes from "./routes/salesTargetRoutes.js";
 import userAllocationRoutes from "./routes/userAllocationRoutes.js";
 import adminRoutes from "./routes/adminRoutes.js";
 import salesManagerRoutes from "./routes/salesManagerRoutes.js";
+import managerTargetRoutes from "./routes/managerTargetRoutes.js";
 
 
 dotenv.config();
@@ -99,6 +100,7 @@ app.use("/api/sales-targets", salesTargetRoutes);
 app.use("/api/user-allocations", userAllocationRoutes);
 app.use("/api/sales-manager", salesManagerRoutes);
 app.use("/api/admin", adminRoutes);
+app.use("/api/manager-targets", managerTargetRoutes);
 
 
 

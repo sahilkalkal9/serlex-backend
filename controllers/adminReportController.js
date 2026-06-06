@@ -489,7 +489,15 @@ export const getAdminLoginLogoutReport = async (req, res) => {
       if (req.query.employee && req.query.employee !== "all" && asId(user) !== req.query.employee) return false;
       return true;
     });
-    const selectedIds = selectedUsers.map((user) => user._id);
+
+    // If sales manager, only show allocated users
+    let finalUsers = selectedUsers;
+    if (req.user?.role === "subadmin" && req.user?.subRole === "sales_manager") {
+      const allocatedUserIds = await getAllocatedUsersForManager(req.user.id || req.user._id);
+      finalUsers = selectedUsers.filter((user) => allocatedUserIds.includes(asId(user)));
+    }
+
+    const selectedIds = finalUsers.map((user) => user._id);
     const activities = await Activity.find({
       ...dateQuery("loginTime", start, end),
       user: { $in: selectedIds },
@@ -872,6 +880,13 @@ export const getAdminAttendanceReport = async (req, res) => {
     if (req.query.employee && req.query.employee !== "all") {
       users = users.filter((user) => asId(user) === req.query.employee);
     }
+
+    // If sales manager, only show allocated users
+    if (req.user?.role === "subadmin" && req.user?.subRole === "sales_manager") {
+      const allocatedUserIds = await getAllocatedUsersForManager(req.user.id || req.user._id);
+      users = users.filter((user) => allocatedUserIds.includes(asId(user)));
+    }
+
     const selectedIds = users.map((user) => user._id);
     const activities = await Activity.find({
       ...dateQuery("loginTime", start, end),
@@ -1154,6 +1169,13 @@ export const getAdminSimpleReport = async (req, res) => {
     if (req.query.employee && req.query.employee !== "all") {
       filterUserIds = filterUserIds.filter((id) => asId(id) === req.query.employee);
     }
+
+    // If sales manager, only show allocated users
+    if (req.user?.role === "subadmin" && req.user?.subRole === "sales_manager") {
+      const allocatedUserIds = await getAllocatedUsersForManager(req.user.id || req.user._id);
+      filterUserIds = filterUserIds.filter((id) => allocatedUserIds.includes(asId(id)));
+    }
+
     activityQuery.user = { $in: filterUserIds };
     meetingQuery.createdBy = { $in: filterUserIds };
 
@@ -1178,7 +1200,7 @@ export const getAdminSimpleReport = async (req, res) => {
 // Get allocated users for a sales manager
 export const getSalesManagerAllocatedUsers = async (req, res) => {
   try {
-    const managerId = req.user._id;
+    const managerId = req.user.id || req.user._id;
 
     const allocations = await UserAllocation.find({
       salesManager: managerId,
