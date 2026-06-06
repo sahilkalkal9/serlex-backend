@@ -4,6 +4,7 @@ import Meeting from "../models/Meeting.js";
 import MeetingReport from "../models/MeetingReport.js";
 import PurchaseOrder from "../models/PurchaseOrder.js";
 import SalesTarget from "../models/SalesTarget.js";
+import ManagerTarget from "../models/ManagerTarget.js";
 import User from "../models/User.js";
 import UserAllocation from "../models/UserAllocation.js";
 
@@ -159,8 +160,9 @@ const buildSalesData = async (start, end, filters = {}, currentUser = null) => {
 
     const monthKeys = getMonthKeys(start, end);
     const periodKeys = monthKeys;
+    const latestPeriodKey = periodKeys[periodKeys.length - 1] || "";
 
-    const [teamTargets, teamPos] = await Promise.all([
+    const [teamTargets, teamPos, managerTargets] = await Promise.all([
       allRelevantIds.length
         ? SalesTarget.find({ period: "Monthly", periodKey: { $in: periodKeys }, salesUser: { $in: allRelevantIds } })
             .populate("salesUser", "name department managerName").lean()
@@ -169,10 +171,13 @@ const buildSalesData = async (start, end, filters = {}, currentUser = null) => {
         ? PurchaseOrder.find({ ...dateQuery("poDate", start, end), createdBy: { $in: allRelevantIds } })
             .populate("createdBy", "name department managerName").lean()
         : Promise.resolve([]),
+      selectedManagerIds.length && latestPeriodKey
+        ? ManagerTarget.find({ manager: { $in: selectedManagerIds }, period: "Monthly", periodKey: latestPeriodKey }).lean()
+        : Promise.resolve([]),
     ]);
 
     const monthly = monthKeys.map((key) => {
-      const target = teamTargets.filter((item) => item.periodKey === key).reduce((total, item) => total + Number(item.targetAmount || 0), 0);
+      const target = managerTargets.filter((t) => t.periodKey === key).reduce((total, t) => total + (Number(t.targetAmount) || 0), 0);
       const achieved = teamPos.filter((po) => monthKey(po.poDate) === key).reduce((total, po) => total + Number(po.poValue || 0), 0);
       return { key, label: monthLabel(key), target, achieved, achievement: percent(achieved, target) };
     });
@@ -194,8 +199,13 @@ const buildSalesData = async (start, end, filters = {}, currentUser = null) => {
       const id = asId(manager);
       const memberIds = managerTeamMap[id] || [];
       const allIds = [...new Set([...memberIds, id])];
-      const pos = teamPos.filter((po) => allIds.includes(asId(po.createdBy)));
-      const target = teamTargets.filter((t) => allIds.includes(asId(t.salesUser))).reduce((total, t) => total + Number(t.targetAmount || 0), 0);
+      const pos = teamPos.filter((po) => {
+        if (!allIds.includes(asId(po.createdBy))) return false;
+        if (latestPeriodKey) return monthKey(po.poDate) === latestPeriodKey;
+        return true;
+      });
+      const mgrTarget = managerTargets.find((t) => asId(t.manager) === id);
+      const target = mgrTarget ? Number(mgrTarget.targetAmount || 0) : 0;
       const achieved = pos.reduce((total, po) => total + Number(po.poValue || 0), 0);
       return {
         id,
@@ -212,8 +222,12 @@ const buildSalesData = async (start, end, filters = {}, currentUser = null) => {
 
     const teamRows = allTeamMemberIds.map((memberId) => {
       const user = restrictedSalesUsers.find((u) => asId(u._id) === memberId);
-      const pos = teamPos.filter((po) => asId(po.createdBy) === memberId);
-      const target = teamTargets.filter((t) => asId(t.salesUser) === memberId).reduce((total, t) => total + Number(t.targetAmount || 0), 0);
+      const pos = teamPos.filter((po) => {
+        if (asId(po.createdBy) !== memberId) return false;
+        if (latestPeriodKey) return monthKey(po.poDate) === latestPeriodKey;
+        return true;
+      });
+      const target = teamTargets.filter((t) => latestPeriodKey ? t.periodKey === latestPeriodKey : true).filter((t) => asId(t.salesUser) === memberId).reduce((total, t) => total + Number(t.targetAmount || 0), 0);
       const achieved = pos.reduce((total, po) => total + Number(po.poValue || 0), 0);
       return {
         id: memberId,
@@ -226,15 +240,15 @@ const buildSalesData = async (start, end, filters = {}, currentUser = null) => {
         variance: Math.max(target - achieved, 0),
         pos: pos.map(poFields),
       };
-    }).filter((row) => row.target > 0 || row.achieved > 0);
+    });
 
     const monthlyTeam = monthly;
     const departmentRows = [];
 
-    const totalTarget = teamTargets.reduce((total, t) => total + Number(t.targetAmount || 0), 0);
-    const totalAchieved = teamPos.reduce((total, po) => total + Number(po.poValue || 0), 0);
-    const avgAchievementPct = monthly.filter((m) => m.target > 0).length
-      ? Math.round(monthly.filter((m) => m.target > 0).reduce((s, m) => s + m.achievement, 0) / monthly.filter((m) => m.target > 0).length)
+    const totalTarget = managerRows.reduce((total, r) => total + (r.target || 0), 0);
+    const totalAchieved = managerRows.reduce((total, r) => total + (r.achieved || 0), 0);
+    const avgAchievementPct = managerRows.length
+      ? Math.round(managerRows.reduce((s, r) => s + (r.achievement || 0), 0) / managerRows.length)
       : 0;
 
     return {
@@ -283,9 +297,10 @@ const buildSalesData = async (start, end, filters = {}, currentUser = null) => {
 
   const monthKeys = getMonthKeys(start, end);
   const periodKeys = monthKeys;
+  const latestPeriodKey = periodKeys[periodKeys.length - 1] || "";
 
   // Fetch targets & POs for all relevant users (managers + their team members)
-  const [teamTargets, teamPos] = await Promise.all([
+  const [teamTargets, teamPos, managerTargets] = await Promise.all([
     allRelevantIds.length
       ? SalesTarget.find({ period: "Monthly", periodKey: { $in: periodKeys }, salesUser: { $in: allRelevantIds } })
           .populate("salesUser", "name department managerName").lean()
@@ -294,11 +309,14 @@ const buildSalesData = async (start, end, filters = {}, currentUser = null) => {
       ? PurchaseOrder.find({ ...dateQuery("poDate", start, end), createdBy: { $in: allRelevantIds } })
           .populate("createdBy", "name department managerName").lean()
       : Promise.resolve([]),
+    selectedManagerIds.length && latestPeriodKey
+      ? ManagerTarget.find({ manager: { $in: selectedManagerIds }, period: "Monthly", periodKey: latestPeriodKey }).lean()
+      : Promise.resolve([]),
   ]);
 
-  // Overall monthly data (all team members combined)
+  // Overall monthly data from manager rows
   const monthly = monthKeys.map((key) => {
-    const target = teamTargets.filter((item) => item.periodKey === key).reduce((total, item) => total + Number(item.targetAmount || 0), 0);
+    const target = managerTargets.filter((t) => t.periodKey === key).reduce((total, t) => total + (Number(t.targetAmount) || 0), 0);
     const achieved = teamPos.filter((po) => monthKey(po.poDate) === key).reduce((total, po) => total + Number(po.poValue || 0), 0);
     return { key, label: monthLabel(key), target, achieved, achievement: percent(achieved, target) };
   });
@@ -321,8 +339,13 @@ const buildSalesData = async (start, end, filters = {}, currentUser = null) => {
     const id = asId(manager);
     const memberIds = managerTeamMap[id] || [];
     const allIds = [...new Set([...memberIds, id])];
-    const pos = teamPos.filter((po) => allIds.includes(asId(po.createdBy)));
-    const target = teamTargets.filter((t) => allIds.includes(asId(t.salesUser))).reduce((total, t) => total + Number(t.targetAmount || 0), 0);
+    const pos = teamPos.filter((po) => {
+      if (!allIds.includes(asId(po.createdBy))) return false;
+      if (latestPeriodKey) return monthKey(po.poDate) === latestPeriodKey;
+      return true;
+    });
+    const mgrTarget = managerTargets.find((t) => asId(t.manager) === id);
+    const target = mgrTarget ? Number(mgrTarget.targetAmount || 0) : 0;
     const achieved = pos.reduce((total, po) => total + Number(po.poValue || 0), 0);
     return {
       id,
@@ -345,8 +368,12 @@ const buildSalesData = async (start, end, filters = {}, currentUser = null) => {
       const memberIds = managerTeamMap[id] || [];
       return memberIds.map((memberId) => {
         const user = salesUsers.find((u) => asId(u) === memberId);
-        const pos = teamPos.filter((po) => asId(po.createdBy) === memberId);
-        const target = teamTargets.filter((t) => asId(t.salesUser) === memberId).reduce((total, t) => total + Number(t.targetAmount || 0), 0);
+        const pos = teamPos.filter((po) => {
+          if (asId(po.createdBy) !== memberId) return false;
+          if (latestPeriodKey) return monthKey(po.poDate) === latestPeriodKey;
+          return true;
+        });
+        const target = teamTargets.filter((t) => latestPeriodKey ? t.periodKey === latestPeriodKey : true).filter((t) => asId(t.salesUser) === memberId).reduce((total, t) => total + Number(t.targetAmount || 0), 0);
         const achieved = pos.reduce((total, po) => total + Number(po.poValue || 0), 0);
         return {
           id: memberId,
@@ -364,8 +391,12 @@ const buildSalesData = async (start, end, filters = {}, currentUser = null) => {
     // Also include unassigned sales users (not under any manager) who have data
     ...salesUsers.filter((u) => !mappedTeamIds.has(asId(u))).map((user) => {
       const uid = asId(user);
-      const pos = teamPos.filter((po) => asId(po.createdBy) === uid);
-      const target = teamTargets.filter((t) => asId(t.salesUser) === uid).reduce((total, t) => total + Number(t.targetAmount || 0), 0);
+      const pos = teamPos.filter((po) => {
+        if (asId(po.createdBy) !== uid) return false;
+        if (latestPeriodKey) return monthKey(po.poDate) === latestPeriodKey;
+        return true;
+      });
+      const target = teamTargets.filter((t) => latestPeriodKey ? t.periodKey === latestPeriodKey : true).filter((t) => asId(t.salesUser) === uid).reduce((total, t) => total + Number(t.targetAmount || 0), 0);
       const achieved = pos.reduce((total, po) => total + Number(po.poValue || 0), 0);
       return {
         id: uid,
@@ -379,7 +410,7 @@ const buildSalesData = async (start, end, filters = {}, currentUser = null) => {
         pos: pos.map(poFields),
       };
     }),
-  ].filter((row) => row.target > 0 || row.achieved > 0);
+  ];
 
   // Monthly team data = same as overall monthly (team members are the data source)
   const monthlyTeam = monthly;
@@ -392,10 +423,10 @@ const buildSalesData = async (start, end, filters = {}, currentUser = null) => {
     return { department, target, achieved, achievement: percent(achieved, target), variance: Math.max(target - achieved, 0) };
   }).filter((row) => row.target || row.achieved);
 
-  const totalTarget = teamTargets.reduce((total, t) => total + Number(t.targetAmount || 0), 0);
-  const totalAchieved = teamPos.reduce((total, po) => total + Number(po.poValue || 0), 0);
-  const avgAchievementPct = monthly.filter((m) => m.target > 0).length
-    ? Math.round(monthly.filter((m) => m.target > 0).reduce((s, m) => s + m.achievement, 0) / monthly.filter((m) => m.target > 0).length)
+  const totalTarget = managerRows.reduce((total, r) => total + (r.target || 0), 0);
+  const totalAchieved = managerRows.reduce((total, r) => total + (r.achieved || 0), 0);
+  const avgAchievementPct = managerRows.length
+    ? Math.round(managerRows.reduce((s, r) => s + (r.achievement || 0), 0) / managerRows.length)
     : 0;
 
   return {
@@ -749,9 +780,13 @@ export const getAdminMeetingAnalyticsReport = async (req, res) => {
         leadId: l.leadId,
         companyName: l.companyName || "-",
         contactPerson: l.contactPerson || "-",
+        phoneNumber: l.phoneNumber || "-",
+        email: l.email || "-",
+        designation: l.designation || "-",
         status: l.status,
         originalMeetingTitle: l.meetingId?.title || "N/A",
         originalMeetingDate: l.meetingId?.startTime,
+        originalMeetingLocation: l.meetingId?.location || "-",
         followUpCount: followUpMeetings.length,
         followUpMeetings,
         reports: reports.map((r) => ({
@@ -767,9 +802,14 @@ export const getAdminMeetingAnalyticsReport = async (req, res) => {
           createdBy: userName(r.createdBy),
           poReceived: r.poReceived,
           purchaseOrderNumber: r.purchaseOrderNumber || "-",
+          companyName: r.companyName || "-",
+          phoneNumber: r.phoneNumber || "-",
+          category: r.category || "-",
+          paymentTerms: r.paymentTerms || "-",
         })),
         latestLeadStatus: latestReport?.leadStatus || "-",
         latestDealValue: latestReport?.expectedDealValue || 0,
+        latestActivityAt: l.latestActivityAt || l.updatedAt || l.createdAt,
       };
     });
 
@@ -856,6 +896,7 @@ export const getAdminPoReport = async (req, res) => {
       summary: { received, completed, delivered, delayed, onTimeDelivery: percent(Math.max(0, delivered - delayed), delivered) },
       monthly,
       managerRows,
+      purchaseOrders,
       comparisonRows: managerRows.map((row) => ({
         ...row,
         receivedShare: percent(row.received, received),

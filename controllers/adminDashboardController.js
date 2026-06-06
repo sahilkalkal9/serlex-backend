@@ -4,6 +4,7 @@ import Meeting from "../models/Meeting.js";
 import MeetingReport from "../models/MeetingReport.js";
 import PurchaseOrder from "../models/PurchaseOrder.js";
 import User from "../models/User.js";
+import UserAllocation from "../models/UserAllocation.js";
 
 const getDateRange = (fromDate, toDate) => {
   const now = new Date();
@@ -89,7 +90,7 @@ export const getAdminDashboard = async (req, res) => {
       const role = a.user?.role;
       if (role && ["superadmin", "admin"].includes(role)) return;
       if (!userMap[uid]) {
-        userMap[uid] = { loginCount: 0, hasLogout: false, user: a.user };
+        userMap[uid] = { loginCount: 0, hasLogout: false };
       }
       userMap[uid].loginCount++;
       if (a.logoutTime) userMap[uid].hasLogout = true;
@@ -296,72 +297,46 @@ export const getAdminHierarchy = async (req, res) => {
       .sort({ role: 1, name: 1 })
       .lean();
 
-    const admins = users.filter((user) => user.role === "admin" || user.role === "superadmin");
-    const managers = users.filter((user) => user.role === "subadmin");
-    const teamUsers = users.filter((user) => !["admin", "superadmin", "subadmin"].includes(user.role));
+    const allocations = await UserAllocation.find({ isActive: true })
+      .populate("salesManager", "name email employeeId department designation subRole")
+      .populate("salesUser", "name email employeeId department designation mobileNumber")
+      .sort({ _id: -1 })
+      .lean();
 
-    const fallbackAdmin = admins[0] || {
-      _id: "admin-root",
-      name: "Admin",
-      email: "",
-      employeeId: "",
-      mobileNumber: "",
-      department: "Administration",
-      designation: "Administrator",
-      role: "admin",
-      subRole: "",
-      status: "approved",
-    };
-
-    const normalize = (user) => ({
-      ...user,
-      id: String(user._id || user.id),
-      children: [],
+    // Build manager → allocated users map
+    const managerMap = {};
+    const allocatedUserIds = new Set();
+    allocations.forEach((a) => {
+      const mgrId = String(a.salesManager?._id);
+      if (!mgrId) return;
+      if (!managerMap[mgrId]) {
+        managerMap[mgrId] = {
+          ...a.salesManager,
+          id: mgrId,
+          children: [],
+        };
+      }
+      const userId = String(a.salesUser?._id);
+      if (userId) {
+        allocatedUserIds.add(userId);
+        managerMap[mgrId].children.push({
+          ...a.salesUser,
+          id: userId,
+        });
+      }
     });
 
-    const managerNodes = managers.map((manager) => {
-      const managerName = (manager.name || "").toLowerCase();
-      const department = manager.department || "";
-      const subRoleDepartment = manager.subRole?.includes("sales")
-        ? "Sales"
-        : manager.subRole?.includes("po")
-        ? "Purchase"
-        : manager.subRole?.includes("ppc")
-        ? "PPC"
-        : "";
+    const managerNodes = Object.values(managerMap);
 
-      return {
-        ...normalize(manager),
-        children: teamUsers
-          .filter((member) => {
-            const memberManager = (member.managerName || "").toLowerCase();
-            return (
-              (memberManager && memberManager === managerName) ||
-              (department && member.department === department) ||
-              (subRoleDepartment && member.department === subRoleDepartment)
-            );
-          })
-          .map(normalize),
-      };
-    });
-
-    const assignedUserIds = new Set(
-      managerNodes.flatMap((manager) => manager.children.map((member) => String(member._id || member.id)))
-    );
-    const unassignedUsers = teamUsers
-      .filter((member) => !assignedUserIds.has(String(member._id)))
-      .map(normalize);
-
-    const tree = admins.length
-      ? admins.map((admin, index) => ({
-          ...normalize(admin),
-          children: index === 0 ? [...managerNodes, ...unassignedUsers] : [],
-        }))
-      : [{ ...normalize(fallbackAdmin), children: [...managerNodes, ...unassignedUsers] }];
+    // Unallocated sales users (role sales_user, not in any allocation)
+    const unallocatedUsers = users.filter((u) => 
+      u.role === "sales_user" && !allocatedUserIds.has(String(u._id))
+    ).map((u) => ({ ...u, id: String(u._id) }));
 
     return res.status(200).json({
       success: true,
-      tree,
+      managerNodes,
+      unallocatedUsers,
     });
   } catch (error) {
     console.error("getAdminHierarchy error:", error);
