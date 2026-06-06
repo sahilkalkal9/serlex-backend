@@ -79,7 +79,7 @@ const getDaySeries = (start, end) => {
 
 const getOptions = async () => {
   const users = (await User.find({ status: { $ne: "inactive" } })
-    .select("name email department designation role subRole managerName workingHours")
+    .select("name email employeeId mobileNumber department designation role subRole managerName workingHours")
     .sort({ name: 1 })
     .lean());
   const departments = [...new Set(users.map((user) => user.department).filter(Boolean))].sort();
@@ -1084,6 +1084,10 @@ export const getAdminAttendanceReport = async (req, res) => {
         id: uid,
         name: userName(user),
         department: user.department || "-",
+        employeeId: user.employeeId || "-",
+        mobileNumber: user.mobileNumber || "-",
+        email: user.email || "-",
+        designation: user.designation || "-",
         workingDays: workingDayKeys.length,
         presentDays,
         partialDays,
