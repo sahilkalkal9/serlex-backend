@@ -75,10 +75,6 @@ const getDelayInfo = (order) => {
   };
 };
 
-const getApprovedFilter = () => ({
-  isApproved: true,
-});
-
 export const createPurchaseOrder = async (req, res) => {
   try {
     const {
@@ -111,7 +107,9 @@ export const createPurchaseOrder = async (req, res) => {
       });
     }
 
-    const existingPO = await PurchaseOrder.findOne({ poNo: poNo.trim() });
+    const existingPO = await PurchaseOrder.findOne({
+      poNo: { $regex: `^${poNo.trim().replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`, $options: "i" },
+    });
 
     if (existingPO) {
       return res.status(409).json({
@@ -827,14 +825,14 @@ export const updateMyDailyActivityOrder = async (req, res) => {
       "Not Ordered",
       "Ordered",
       "Material Received",
-      "Invoiced",
       "Approved",
       "Processed",
       "In Transit",
+      "Invoiced",
       "Delivered",
+      "Completed",
       "Payment Received",
       "Delayed",
-      "Completed",
     ];
 
     if (!activityStatus) {
@@ -915,7 +913,7 @@ export const updateMyDailyActivityOrder = async (req, res) => {
 
     if (activityStatus === "Material Received") {
       updateData.status = "In Progress";
-      updateData.trackingStatus = "Delivered";
+      updateData.trackingStatus = "In Transit";
       updateData.processingStatus = "Processed";
       updateData.deliveryDate = deliveryDate || new Date();
     }
@@ -927,30 +925,16 @@ export const updateMyDailyActivityOrder = async (req, res) => {
       updateData.deliveryDate = deliveryDate || new Date();
     }
 
-    if (activityStatus === "Invoiced") {
-      updateData.status = "In Progress";
-      updateData.trackingStatus = "Invoiced";
-      updateData.processingStatus = "Processed";
-    }
-
-    if (activityStatus === "Payment Received") {
+    if (activityStatus === "Completed") {
       updateData.status = "Completed";
-      updateData.trackingStatus = "Payment Received";
+      updateData.trackingStatus = "Completed";
       updateData.processingStatus = "Processed";
-      updateData.paymentReceivedDate = paymentReceivedDate || new Date();
     }
 
     if (activityStatus === "Delayed") {
       updateData.status = "In Progress";
       updateData.trackingStatus = "Delayed";
       updateData.processingStatus = "Delayed";
-    }
-
-    if (activityStatus === "Completed") {
-      updateData.status = "Completed";
-      updateData.trackingStatus = "Payment Received";
-      updateData.processingStatus = "Processed";
-      updateData.paymentReceivedDate = paymentReceivedDate || new Date();
     }
 
     if (deliveryDate !== undefined) {
@@ -1008,48 +992,53 @@ const trackingSteps = [
   "Approved",
   "Processed",
   "In Transit",
-  "Delivered",
   "Invoiced",
   "Payment Received",
+  "Delivered",
+  "Completed",
 ];
 
 const getTrackingDelayInfo = (order) => {
-  if (!order.expectedDeliveryDate) {
+  const info = getDelayInfo(order);
+
+  if (info.delayType === "delayed") {
     return {
-      delayType: "pending",
-      delayText: "Pending",
+      delayType: "delayed",
+      delayText: `${info.delayDays} day${info.delayDays > 1 ? "s" : ""} Delayed`,
     };
   }
 
-  const expected = new Date(order.expectedDeliveryDate);
-  const compare = order.deliveryDate ? new Date(order.deliveryDate) : new Date();
-
-  expected.setHours(0, 0, 0, 0);
-  compare.setHours(0, 0, 0, 0);
-
-  const diffDays = Math.ceil(
-    (compare.getTime() - expected.getTime()) / (1000 * 60 * 60 * 24)
-  );
-
-  if (diffDays > 0) {
+  if (info.delayType === "early") {
     return {
-      delayType: "delayed",
-      delayText: `${diffDays} day${diffDays > 1 ? "s" : ""} Delayed`,
+      delayType: "onTime",
+      delayText: "On Time",
+    };
+  }
+
+  if (info.delayType === "onTime") {
+    return {
+      delayType: "onTime",
+      delayText: "On Time",
     };
   }
 
   return {
-    delayType: "onTime",
-    delayText: "On Time",
+    delayType: "pending",
+    delayText: "Pending",
   };
 };
 
 const getTrackingProgress = (trackingStatus = "Not Approved") => {
   if (trackingStatus === "Not Approved") return 0;
   if (trackingStatus === "Delayed") return 0;
-
-  const index = trackingSteps.indexOf(trackingStatus);
-  return index >= 0 ? index + 1 : 0;
+  if (trackingStatus === "Approved") return 1;
+  if (trackingStatus === "Processed") return 2;
+  if (trackingStatus === "In Transit") return 3;
+  if (trackingStatus === "Invoiced") return 4;
+  if (trackingStatus === "Payment Received") return 5;
+  if (trackingStatus === "Delivered") return 6;
+  if (trackingStatus === "Completed") return 7;
+  return 0;
 };
 
 export const getPOTrackingOrders = async (req, res) => {
@@ -1081,18 +1070,36 @@ export const getPOTrackingOrders = async (req, res) => {
     }
 
     if (vendor && vendor !== "All") {
-      filter.$or = [
+      const vendorFilter = [
         { vendorName: { $regex: vendor, $options: "i" } },
         { companyName: { $regex: vendor, $options: "i" } },
       ];
+
+      if (filter.$and) {
+        filter.$and.push({ $or: vendorFilter });
+      } else if (filter.$or) {
+        filter.$and = [{ $or: filter.$or }, { $or: vendorFilter }];
+        delete filter.$or;
+      } else {
+        filter.$or = vendorFilter;
+      }
     }
 
     if (search) {
-      filter.$or = [
+      const searchFilter = [
         { poNo: { $regex: search, $options: "i" } },
         { companyName: { $regex: search, $options: "i" } },
         { vendorName: { $regex: search, $options: "i" } },
       ];
+
+      if (filter.$and) {
+        filter.$and.push({ $or: searchFilter });
+      } else if (filter.$or) {
+        filter.$and = [{ $or: filter.$or }, { $or: searchFilter }];
+        delete filter.$or;
+      } else {
+        filter.$or = searchFilter;
+      }
     }
 
     const orders = await PurchaseOrder.find(filter).sort({ _id: -1 });
@@ -1125,12 +1132,12 @@ export const getPOTrackingOrders = async (req, res) => {
     const totalPOs = rows.length;
 
     const completed = rows.filter(
-      (item) => item.currentStatus === "Payment Received"
+      (item) => item.currentStatus === "Completed"
     ).length;
 
     const inProcess = rows.filter(
       (item) =>
-        !["Not Approved", "Delayed", "Payment Received"].includes(
+        !["Not Approved", "Delayed", "Completed"].includes(
           item.currentStatus
         )
     ).length;
@@ -1171,9 +1178,10 @@ export const updatePOTrackingOrder = async (req, res) => {
       "Approved",
       "Processed",
       "In Transit",
-      "Delivered",
       "Invoiced",
       "Payment Received",
+      "Delivered",
+      "Completed",
       "Delayed",
     ];
 
@@ -1181,6 +1189,22 @@ export const updatePOTrackingOrder = async (req, res) => {
       return res.status(400).json({
         success: false,
         message: "Invalid tracking status",
+      });
+    }
+
+    const existingOrder = await PurchaseOrder.findById(req.params.id);
+
+    if (!existingOrder) {
+      return res.status(404).json({
+        success: false,
+        message: "Purchase order not found",
+      });
+    }
+
+    if (!existingOrder.isApproved && trackingStatus !== "Not Approved") {
+      return res.status(400).json({
+        success: false,
+        message: "Only approved purchase orders can have tracking updated",
       });
     }
 
@@ -1487,13 +1511,10 @@ const normalizePOAction = (value) => {
     delay: "delayed",
     delayed: "delayed",
     not_processed: "not_processed",
-    invoice: "invoiced",
     invoiced: "invoiced",
     delivered: "delivered",
     completed: "completed",
     payment_received: "payment_received",
-    completed_and_payment_received: "payment_received",
-    project_completed_and_payment_received: "payment_received",
   };
 
   return aliases[key] || key;
@@ -1519,7 +1540,6 @@ export const updatePOActionStatus = async (req, res) => {
       "not_started",
       "in_progress",
       "processed",
-      "delay",
       "delayed",
       "not_processed",
       "invoiced",
@@ -1567,7 +1587,6 @@ export const updatePOActionStatus = async (req, res) => {
       not_started: "Not Started",
       in_progress: "In Progress",
       processed: "Processed",
-      delay: "Delayed",
       delayed: "Delayed",
       not_processed: "Not Processed",
       invoiced: "Invoiced",
@@ -1687,7 +1706,7 @@ export const updatePOActionStatus = async (req, res) => {
       }
 
       updateData.deliveryDate = new Date();
-      updateData.activityStatus = "Material Received";
+      updateData.activityStatus = "Delivered";
       updateData.trackingStatus = "Delivered";
       updateData.processingStatus = "Processed";
       updateData.status = "In Progress";
@@ -1707,7 +1726,7 @@ export const updatePOActionStatus = async (req, res) => {
       }
 
       updateData.status = "Completed";
-      updateData.trackingStatus = "Delivered";
+      updateData.trackingStatus = "Completed";
       updateData.activityStatus = "Completed";
       updateData.processingStatus = "Processed";
       updateData.processedBy = getUserId(req);
@@ -1725,7 +1744,7 @@ export const updatePOActionStatus = async (req, res) => {
         });
       }
 
-      updateData.status = "Completed";
+      updateData.status = "In Progress";
       updateData.trackingStatus = "Payment Received";
       updateData.activityStatus = "Payment Received";
       updateData.processingStatus = "Processed";
@@ -1814,7 +1833,7 @@ export const getSalesManagerPOTrackingOrders = async (req, res) => {
     }
 
     if (search) {
-      filter.$or = [
+      const searchFilter = [
         { poNo: { $regex: search, $options: "i" } },
         { companyName: { $regex: search, $options: "i" } },
         { vendorName: { $regex: search, $options: "i" } },
@@ -1822,6 +1841,13 @@ export const getSalesManagerPOTrackingOrders = async (req, res) => {
         { trackingStatus: { $regex: search, $options: "i" } },
         { status: { $regex: search, $options: "i" } },
       ];
+
+      if (filter.$or) {
+        filter.$and = [{ $or: filter.$or }, { $or: searchFilter }];
+        delete filter.$or;
+      } else {
+        filter.$or = searchFilter;
+      }
     }
 
     const orders = await PurchaseOrder.find(filter)

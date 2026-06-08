@@ -78,14 +78,14 @@ const purchaseOrderSchema = new mongoose.Schema(
         "Not Ordered",
         "Ordered",
         "Material Received",
-        "Invoiced",
         "Approved",
         "Processed",
         "In Transit",
-        "Delivered",
+        "Invoiced",
         "Payment Received",
-        "Delayed",
+        "Delivered",
         "Completed",
+        "Delayed",
       ],
       default: "Not Ordered",
     },
@@ -135,9 +135,10 @@ const purchaseOrderSchema = new mongoose.Schema(
         "Approved",
         "Processed",
         "In Transit",
-        "Delivered",
         "Invoiced",
         "Payment Received",
+        "Delivered",
+        "Completed",
         "Delayed",
       ],
       default: "Not Approved",
@@ -207,6 +208,13 @@ const purchaseOrderSchema = new mongoose.Schema(
   },
   { timestamps: true }
 );
+
+purchaseOrderSchema.index({ category: 1, status: 1 });
+purchaseOrderSchema.index({ category: 1, isApproved: 1 });
+purchaseOrderSchema.index({ category: 1, trackingStatus: 1 });
+purchaseOrderSchema.index({ poDate: -1 });
+purchaseOrderSchema.index({ vendorName: 1 });
+purchaseOrderSchema.index({ companyName: 1 });
 
 const PurchaseOrder = mongoose.model("PurchaseOrder", purchaseOrderSchema);
 

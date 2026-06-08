@@ -857,7 +857,13 @@ export const getAdminPoReport = async (req, res) => {
       query.createdBy = { $in: ids };
     }
 
-    const purchaseOrders = await PurchaseOrder.find(query).sort({ _id: -1 }).populate("createdBy", "name department managerName").lean();
+    const purchaseOrders = await PurchaseOrder.find(query)
+      .sort({ _id: -1 })
+      .populate("createdBy", "name department managerName")
+      .populate("approvedBy", "name email")
+      .populate("processedBy", "name email")
+      .populate("statusLogs.updatedBy", "name email employeeId")
+      .lean();
     const monthKeys = getMonthKeys(start, end);
     const received = purchaseOrders.length;
     const completed = purchaseOrders.filter((po) => ["Completed", "Payment Received"].includes(po.activityStatus) || po.status === "Completed").length;
