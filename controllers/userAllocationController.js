@@ -327,7 +327,17 @@ export const getManagersWithAllocations = async (req, res) => {
             manager: manager._id,
             period,
             periodKey,
-          }).select("targetAmount period periodKey remarks");
+          }).select("targetAmount selfTarget teamTarget period periodKey remarks");
+
+          // Compute targetAmount from self + team if targetAmount is 0
+          if (target) {
+            const tgtObj = target.toObject ? target.toObject() : target;
+            const st = Number(tgtObj.selfTarget || 0);
+            const tt = Number(tgtObj.teamTarget || 0);
+            if (!tgtObj.targetAmount && (st || tt)) {
+              tgtObj.targetAmount = st + tt;
+            }
+          }
 
           // If no direct quarterly/yearly target, aggregate from monthly targets
           if (!target && period !== "Monthly") {
@@ -336,15 +346,19 @@ export const getManagersWithAllocations = async (req, res) => {
               manager: manager._id,
               period: "Monthly",
               periodKey: { $in: monthlyKeys },
-            }).select("targetAmount periodKey");
+            }).select("targetAmount selfTarget teamTarget periodKey");
             const totalMonths = monthlyKeys.length;
             const filledCount = monthlyTargets.length;
             if (filledCount > 0) {
-              const sum = monthlyTargets.reduce((s, t) => s + (Number(t.targetAmount) || 0), 0);
+              const sum = monthlyTargets.reduce((s, t) => s + (Number(t.targetAmount || (t.selfTarget || 0) + (t.teamTarget || 0)) || 0), 0);
+              const selfSum = monthlyTargets.reduce((s, t) => s + (Number(t.selfTarget || 0)), 0);
+              const teamSum = monthlyTargets.reduce((s, t) => s + (Number(t.teamTarget || 0)), 0);
               const projectedAmount = Math.round((sum / filledCount) * totalMonths);
               target = {
                 _id: null,
                 targetAmount: projectedAmount,
+                selfTarget: Math.round((selfSum / filledCount) * totalMonths),
+                teamTarget: Math.round((teamSum / filledCount) * totalMonths),
                 period,
                 periodKey,
                 remarks: `Projected from ${filledCount}/${totalMonths} monthly target(s)`,
@@ -429,6 +443,8 @@ export const getManagersWithAllocations = async (req, res) => {
             ? {
                 _id: target._id,
                 targetAmount,
+                selfTarget: Number(target?.selfTarget || 0),
+                teamTarget: Number(target?.teamTarget || 0),
                 period: target.period,
                 periodKey: target.periodKey,
                 remarks: target.remarks,

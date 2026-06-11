@@ -29,7 +29,7 @@ const getDateRangeFilter = (fromDate, toDate, field = "poDate") => {
 };
 
 const getDelayInfo = (order) => {
-  if (!order.expectedDeliveryDate) {
+  if (!order.deliveryDate) {
     return {
       delayStatus: "Pending",
       delayDays: 0,
@@ -37,16 +37,13 @@ const getDelayInfo = (order) => {
     };
   }
 
-  const expectedDate = new Date(order.expectedDeliveryDate);
-  const compareDate = order.deliveryDate
-    ? new Date(order.deliveryDate)
-    : new Date();
-
-  expectedDate.setHours(0, 0, 0, 0);
-  compareDate.setHours(0, 0, 0, 0);
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const deliveryDate = new Date(order.deliveryDate);
+  deliveryDate.setHours(0, 0, 0, 0);
 
   const diffDays = Math.ceil(
-    (compareDate.getTime() - expectedDate.getTime()) /
+    (today.getTime() - deliveryDate.getTime()) /
       (1000 * 60 * 60 * 24)
   );
 
@@ -59,19 +56,18 @@ const getDelayInfo = (order) => {
   }
 
   if (diffDays < 0) {
-    const earlyDays = Math.abs(diffDays);
-
+    const dueDays = Math.abs(diffDays);
     return {
-      delayStatus: `Early (${earlyDays} day${earlyDays > 1 ? "s" : ""})`,
+      delayStatus: `Due in ${dueDays} day${dueDays > 1 ? "s" : ""}`,
       delayDays: diffDays,
-      delayType: "early",
+      delayType: "ontime",
     };
   }
 
   return {
-    delayStatus: "On Time",
+    delayStatus: "Today",
     delayDays: 0,
-    delayType: "onTime",
+    delayType: "ontime",
   };
 };
 
@@ -1126,6 +1122,7 @@ export const getPOTrackingOrders = async (req, res) => {
         trackingRemarks: order.trackingRemarks || "",
         isApproved: order.isApproved,
         processingStatus: order.processingStatus,
+        statusLogs: order.statusLogs || [],
       };
     });
 
@@ -1163,6 +1160,305 @@ export const getPOTrackingOrders = async (req, res) => {
     return res.status(500).json({
       success: false,
       message: "Failed to fetch PO tracking orders",
+      error: error.message,
+    });
+  }
+};
+
+export const getPpcPlanningTrackingOrders = async (req, res) => {
+  try {
+    const { fromDate, toDate, approvalStatus, search, category, vendorFilter } = req.query;
+
+    const filter = {
+      ...getDateRangeFilter(fromDate, toDate, "poDate"),
+    };
+
+    if (category && category !== "All" && category !== "All Categories") {
+      filter.category = category;
+    } else {
+      filter.category = { $in: ["Service", "Services", "Manufacturing"] };
+    }
+
+    if (approvalStatus === "Approved") {
+      filter.isApproved = true;
+    } else if (approvalStatus === "Not Approved") {
+      filter.isApproved = false;
+    }
+
+    const andConditions = [];
+
+    if (search) {
+      andConditions.push({
+        $or: [
+          { poNo: { $regex: search, $options: "i" } },
+          { companyName: { $regex: search, $options: "i" } },
+          { vendorName: { $regex: search, $options: "i" } },
+          { status: { $regex: search, $options: "i" } },
+          { activityStatus: { $regex: search, $options: "i" } },
+          { trackingStatus: { $regex: search, $options: "i" } },
+          { processingStatus: { $regex: search, $options: "i" } },
+        ],
+      });
+    }
+
+    if (vendorFilter && vendorFilter !== "All" && vendorFilter !== "All Vendors") {
+      andConditions.push({
+        $or: [
+          { companyName: vendorFilter },
+          { vendorName: vendorFilter },
+        ],
+      });
+    }
+
+    if (andConditions.length > 0) {
+      filter.$and = andConditions;
+    }
+
+    const orders = await PurchaseOrder.find(filter)
+      .populate("approvedBy", "name email designation role subRole")
+      .populate("processedBy", "name email designation role subRole")
+      .populate("createdBy", "name email designation role subRole")
+      .sort({ _id: -1 });
+
+    const totalPOs = orders.length;
+    const approvedPOs = orders.filter((o) => o.isApproved).length;
+    const notApprovedPOs = orders.filter((o) => !o.isApproved).length;
+    const pendingPOs = orders.filter((o) => o.status === "Pending" || !o.isApproved).length;
+    const totalPOValue = orders.reduce((sum, o) => sum + Number(o.poValue || 0), 0);
+
+    return res.status(200).json({
+      success: true,
+      cards: {
+        totalTradingPOs: totalPOs,
+        approvedPOs,
+        notApprovedPOs,
+        pendingPOs,
+        totalPOValue: formatMoney(totalPOValue),
+      },
+      rows: orders.map((order) => ({
+        _id: order._id,
+        poNo: order.poNo,
+        companyName: order.companyName,
+        vendorCompany: order.vendorName || order.companyName,
+        vendorName: order.vendorName || "",
+        category: order.category,
+        poValue: order.poValue,
+        formattedPOValue: formatMoney(order.poValue),
+        poDate: order.poDate,
+        expectedDeliveryDate: order.expectedDeliveryDate,
+        deliveryDate: order.deliveryDate,
+        paymentReceivedDate: order.paymentReceivedDate,
+        status: order.status,
+        activityStatus: order.activityStatus,
+        trackingStatus: order.trackingStatus,
+        processingStatus: order.processingStatus,
+        currentStatus: order.trackingStatus || order.activityStatus || order.processingStatus || order.status,
+        isApproved: order.isApproved,
+        approvedBy: order.approvedBy,
+        approvedDate: order.approvedDate,
+        approvalRemarks: order.approvalRemarks || "",
+        processedBy: order.processedBy,
+        processedDate: order.processedDate,
+        processingRemarks: order.processingRemarks || "",
+        trackingRemarks: order.trackingRemarks || "",
+        remarks: order.remarks || "",
+        createdBy: order.createdBy,
+        statusLogs: Array.isArray(order.statusLogs) ? order.statusLogs : [],
+        createdAt: order.createdAt,
+        updatedAt: order.updatedAt,
+      })),
+    });
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      message: "Failed to fetch PPC planning tracking orders",
+      error: error.message,
+    });
+  }
+};
+
+export const updatePpcPlanningApproval = async (req, res) => {
+  try {
+    const { isApproved, approvalRemarks, deliveryDate } = req.body;
+
+    if (typeof isApproved !== "boolean") {
+      return res.status(400).json({
+        success: false,
+        message: "isApproved must be true or false",
+      });
+    }
+
+    const order = await PurchaseOrder.findOne({
+      _id: req.params.id,
+      category: { $in: ["Service", "Services", "Manufacturing"] },
+    });
+
+    if (!order) {
+      return res.status(404).json({
+        success: false,
+        message: "Service purchase order not found",
+      });
+    }
+
+    if (isApproved && order.isApproved && order.deliveryDate) {
+      return res.status(400).json({
+        success: false,
+        message: "Delivery date already fixed and approved. Cannot modify.",
+      });
+    }
+
+    if (isApproved && !deliveryDate) {
+      return res.status(400).json({
+        success: false,
+        message: "Delivery date is required to approve",
+      });
+    }
+
+    const updateData = {
+      isApproved,
+      approvalRemarks: approvalRemarks || "",
+      status: isApproved ? "Approved" : "Pending",
+      trackingStatus: isApproved ? "Approved" : "Not Approved",
+      approvedBy: isApproved ? getUserId(req) : null,
+      approvedDate: isApproved ? new Date() : null,
+    };
+
+    if (isApproved && deliveryDate) {
+      updateData.deliveryDate = new Date(deliveryDate);
+      updateData.activityStatus = "Ordered";
+    }
+
+    if (!isApproved) {
+      updateData.processingStatus = "Pending";
+      updateData.processedBy = null;
+      updateData.processedDate = null;
+      updateData.processingRemarks = "";
+      updateData.activityStatus = "Not Ordered";
+      updateData.deliveryDate = null;
+    }
+
+    const updatedOrder = await PurchaseOrder.findByIdAndUpdate(
+      req.params.id,
+      updateData,
+      { new: true }
+    )
+      .populate("approvedBy", "name email designation")
+      .populate("createdBy", "name email designation");
+
+    return res.status(200).json({
+      success: true,
+      message: isApproved
+        ? "Purchase order approved successfully with delivery date"
+        : "Purchase order marked as not approved",
+      order: updatedOrder,
+    });
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      message: "Failed to update PPC planning approval",
+      error: error.message,
+    });
+  }
+};
+
+export const getPpcTrackingOrders = async (req, res) => {
+  try {
+    const { fromDate, toDate, status, vendor, search } = req.query;
+
+    const filter = {
+      category: { $in: ["Service", "Services", "Manufacturing"] },
+    };
+
+    if (fromDate || toDate) {
+      filter.poDate = {};
+      if (fromDate) {
+        const from = new Date(fromDate);
+        from.setHours(0, 0, 0, 0);
+        filter.poDate.$gte = from;
+      }
+      if (toDate) {
+        const to = new Date(toDate);
+        to.setHours(23, 59, 59, 999);
+        filter.poDate.$lte = to;
+      }
+    }
+
+    if (status && status !== "All") {
+      filter.trackingStatus = status;
+    }
+
+    if (vendor && vendor !== "All") {
+      const vendorFilter = [
+        { vendorName: { $regex: vendor, $options: "i" } },
+        { companyName: { $regex: vendor, $options: "i" } },
+      ];
+      if (filter.$or) {
+        filter.$and = [{ $or: filter.$or }, { $or: vendorFilter }];
+        delete filter.$or;
+      } else {
+        filter.$or = vendorFilter;
+      }
+    }
+
+    if (search) {
+      const searchFilter = [
+        { poNo: { $regex: search, $options: "i" } },
+        { companyName: { $regex: search, $options: "i" } },
+        { vendorName: { $regex: search, $options: "i" } },
+      ];
+      if (filter.$and) {
+        filter.$and.push({ $or: searchFilter });
+      } else if (filter.$or) {
+        filter.$and = [{ $or: filter.$or }, { $or: searchFilter }];
+        delete filter.$or;
+      } else {
+        filter.$or = searchFilter;
+      }
+    }
+
+    const orders = await PurchaseOrder.find(filter).sort({ _id: -1 });
+
+    const rows = orders.map((order) => {
+      const delayInfo = getTrackingDelayInfo(order);
+      const trackingStatus = order.trackingStatus || "Not Approved";
+
+      return {
+        _id: order._id,
+        poNo: order.poNo,
+        category: order.category,
+        vendorCompany: order.vendorName || order.companyName,
+        companyName: order.companyName,
+        vendorName: order.vendorName || "",
+        poDate: order.poDate,
+        poValue: order.poValue,
+        currentStatus: trackingStatus,
+        progress: getTrackingProgress(trackingStatus),
+        expectedDeliveryDate: order.expectedDeliveryDate,
+        deliveryDate: order.deliveryDate,
+        delayType: delayInfo.delayType,
+        delayText: delayInfo.delayText,
+        trackingRemarks: order.trackingRemarks || "",
+        isApproved: order.isApproved,
+        processingStatus: order.processingStatus,
+        statusLogs: order.statusLogs || [],
+      };
+    });
+
+    return res.status(200).json({
+      success: true,
+      cards: {
+        totalPOs: rows.length,
+        completed: rows.filter((r) => r.currentStatus === "Completed").length,
+        inProcess: rows.filter((r) => !["Not Approved", "Delayed", "Completed"].includes(r.currentStatus)).length,
+        delayed: rows.filter((r) => r.delayType === "delayed").length,
+        notApproved: rows.filter((r) => r.currentStatus === "Not Approved").length,
+      },
+      rows,
+    });
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      message: "Failed to fetch PPC tracking orders",
       error: error.message,
     });
   }
@@ -1423,7 +1719,7 @@ export const getPurchasePlanningTrackingOrders = async (req, res) => {
 
 export const updatePurchasePlanningApproval = async (req, res) => {
   try {
-    const { isApproved, approvalRemarks } = req.body;
+    const { isApproved, approvalRemarks, deliveryDate } = req.body;
 
     if (typeof isApproved !== "boolean") {
       return res.status(400).json({
@@ -1444,6 +1740,20 @@ export const updatePurchasePlanningApproval = async (req, res) => {
       });
     }
 
+    if (isApproved && order.isApproved && order.deliveryDate) {
+      return res.status(400).json({
+        success: false,
+        message: "Delivery date already fixed and approved. Cannot modify.",
+      });
+    }
+
+    if (isApproved && !deliveryDate) {
+      return res.status(400).json({
+        success: false,
+        message: "Delivery date is required to approve",
+      });
+    }
+
     const updateData = {
       isApproved,
       approvalRemarks: approvalRemarks || "",
@@ -1453,12 +1763,18 @@ export const updatePurchasePlanningApproval = async (req, res) => {
       approvedDate: isApproved ? new Date() : null,
     };
 
+    if (isApproved && deliveryDate) {
+      updateData.deliveryDate = new Date(deliveryDate);
+      updateData.activityStatus = "Ordered";
+    }
+
     if (!isApproved) {
       updateData.processingStatus = "Pending";
       updateData.processedBy = null;
       updateData.processedDate = null;
       updateData.processingRemarks = "";
       updateData.activityStatus = "Not Ordered";
+      updateData.deliveryDate = null;
     }
 
     const updatedOrder = await PurchaseOrder.findByIdAndUpdate(
@@ -1472,7 +1788,7 @@ export const updatePurchasePlanningApproval = async (req, res) => {
     return res.status(200).json({
       success: true,
       message: isApproved
-        ? "Purchase order approved successfully"
+        ? "Purchase order approved successfully with delivery date"
         : "Purchase order marked as not approved",
       order: updatedOrder,
     });
@@ -1546,6 +1862,9 @@ export const updatePOActionStatus = async (req, res) => {
       "delivered",
       "completed",
       "payment_received",
+      "ready_to_dispatch",
+      "dispatched",
+      "handover",
     ];
 
     if (!action || !allowedActions.includes(action)) {
@@ -1596,6 +1915,13 @@ export const updatePOActionStatus = async (req, res) => {
     };
 
     if (action === "approve") {
+      const { deliveryDate } = req.body;
+      if (!deliveryDate) {
+        return res.status(400).json({
+          success: false,
+          message: "Delivery date is required to approve",
+        });
+      }
       updateData.isApproved = true;
       updateData.status = "Approved";
       updateData.trackingStatus = "Approved";
@@ -1603,9 +1929,16 @@ export const updatePOActionStatus = async (req, res) => {
       updateData.approvedDate = new Date();
       updateData.approvalRemarks = cleanRemarks;
       updateData.remarks = cleanRemarks;
+      updateData.deliveryDate = new Date(deliveryDate);
     }
 
     if (action === "reject") {
+      if (order.isApproved && order.deliveryDate) {
+        return res.status(400).json({
+          success: false,
+          message: "Delivery date already fixed. Cannot reject.",
+        });
+      }
       updateData.isApproved = false;
       updateData.status = "Pending";
       updateData.trackingStatus = "Not Approved";

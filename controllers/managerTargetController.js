@@ -76,9 +76,14 @@ export const upsertManagerTarget = async (req, res) => {
       });
     }
 
-    const { managerId, period, periodKey, targetAmount, remarks = "" } = req.body;
+    const { managerId, period, periodKey, targetAmount, selfTarget, teamTarget, remarks = "" } = req.body;
 
-    if (!managerId || !period || !periodKey || targetAmount === undefined) {
+    const selfT = Number(selfTarget ?? 0);
+    const teamT = Number(teamTarget ?? 0);
+    const totalT = Number(targetAmount ?? 0);
+    const finalTargetAmount = totalT > 0 ? totalT : selfT + teamT;
+
+    if (!managerId || !period || !periodKey || (finalTargetAmount === 0 && !targetAmount && !selfTarget && !teamTarget)) {
       return res.status(400).json({
         success: false,
         message: "Manager ID, period, period key and target amount are required",
@@ -115,7 +120,9 @@ export const upsertManagerTarget = async (req, res) => {
         manager: managerId,
         period,
         periodKey,
-        targetAmount: Number(targetAmount || 0),
+        targetAmount: Number(finalTargetAmount || 0),
+        selfTarget: selfT,
+        teamTarget: teamT,
         remarks,
         updatedBy: getUserId(req),
         $setOnInsert: {
@@ -262,11 +269,18 @@ export const getMyManagerTarget = async (req, res) => {
     }).populate("manager", "name email employeeId designation department");
 
     let targetAmount = 0;
+    let selfTarget = 0;
+    let teamTarget = 0;
     let targetRemarks = "";
     let projectedFromMonthly = false;
 
     if (target) {
       targetAmount = Number(target.targetAmount || 0);
+      selfTarget = Number(target.selfTarget || 0);
+      teamTarget = Number(target.teamTarget || 0);
+      if (targetAmount === 0 && (selfTarget || teamTarget)) {
+        targetAmount = selfTarget + teamTarget;
+      }
       targetRemarks = target.remarks || "";
     } else if (period !== "Monthly") {
       // Project from monthly targets
@@ -275,11 +289,15 @@ export const getMyManagerTarget = async (req, res) => {
         manager: managerId,
         period: "Monthly",
         periodKey: { $in: monthlyKeys },
-      }).select("targetAmount periodKey");
+      }).select("targetAmount selfTarget teamTarget periodKey");
       const filledCount = monthlyTargets.length;
       if (filledCount > 0) {
-        const sum = monthlyTargets.reduce((s, t) => s + (Number(t.targetAmount) || 0), 0);
+        const sum = monthlyTargets.reduce((s, t) => s + (Number(t.targetAmount || (t.selfTarget || 0) + (t.teamTarget || 0)) || 0), 0);
         targetAmount = Math.round((sum / filledCount) * monthlyKeys.length);
+        const selfSum = monthlyTargets.reduce((s, t) => s + (Number(t.selfTarget || 0)), 0);
+        const teamSum = monthlyTargets.reduce((s, t) => s + (Number(t.teamTarget || 0)), 0);
+        selfTarget = Math.round((selfSum / filledCount) * monthlyKeys.length);
+        teamTarget = Math.round((teamSum / filledCount) * monthlyKeys.length);
         targetRemarks = `Projected from ${filledCount}/${monthlyKeys.length} monthly target(s)`;
         projectedFromMonthly = true;
       }
@@ -346,6 +364,8 @@ export const getMyManagerTarget = async (req, res) => {
         period,
         periodKey,
         targetAmount,
+        selfTarget,
+        teamTarget,
         achievedAmount: totalAchieved,
         personalAchieved: achievedAmount,
         teamAchieved,

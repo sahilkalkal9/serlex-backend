@@ -29,6 +29,16 @@ const managerTargetSchema = new mongoose.Schema(
       default: 0,
     },
 
+    selfTarget: {
+      type: Number,
+      default: 0,
+    },
+
+    teamTarget: {
+      type: Number,
+      default: 0,
+    },
+
     remarks: {
       type: String,
       default: "",

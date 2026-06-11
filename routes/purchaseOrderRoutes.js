@@ -13,6 +13,9 @@ import {
   updatePurchasePlanningApproval,
   updatePOActionStatus,
   getSalesManagerPOTrackingOrders,
+  getPpcTrackingOrders,
+  getPpcPlanningTrackingOrders,
+  updatePpcPlanningApproval,
 } from "../controllers/purchaseOrderController.js";
 import { protect } from "../middlewares/authMiddleware.js";
 
@@ -35,5 +38,8 @@ router.get("/planning-tracking", protect, getPurchasePlanningTrackingOrders);
 router.patch("/planning-tracking/:id", protect, updatePurchasePlanningApproval);
 router.patch("/approved/:id/action", protect, updatePOActionStatus);
 router.get("/sales-manager-tracking", protect, getSalesManagerPOTrackingOrders);
+router.get("/ppc-tracking", protect, getPpcTrackingOrders);
+router.get("/ppc-planning-tracking", protect, getPpcPlanningTrackingOrders);
+router.patch("/ppc-planning-tracking/:id", protect, updatePpcPlanningApproval);
 
 export default router;

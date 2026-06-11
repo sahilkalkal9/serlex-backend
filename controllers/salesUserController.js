@@ -2,11 +2,18 @@ import User from "../models/User.js";
 
 export const getSalesUsers = async (req, res) => {
   try {
-    const { search = "" } = req.query;
+    const { search = "", status } = req.query;
 
     const query = {
       role: "sales_user",
     };
+
+    if (status === "inactive") {
+      query.status = "inactive";
+    } else if (status === "all") {
+    } else {
+      query.status = { $ne: "inactive" };
+    }
 
     if (search) {
       query.$or = [
@@ -185,11 +192,12 @@ export const deleteSalesUser = async (req, res) => {
       });
     }
 
-    await User.findByIdAndDelete(id);
+    existingUser.status = "inactive";
+    await existingUser.save();
 
     return res.status(200).json({
       success: true,
-      message: "Sales user deleted successfully",
+      message: "Sales user deactivated successfully",
     });
   } catch (error) {
     console.error("deleteSalesUser error:", error);
