@@ -24,6 +24,24 @@ export const protect = async (req, res, next) => {
   }
 };
 
+export const ADMIN_PANEL_ROLES = [
+  "admin",
+  "superadmin",
+  "radmin",
+];
+
+export const ALL_ADMIN_ROLES = [
+  "admin",
+  "superadmin",
+  "radmin",
+];
+
+export const ADMIN_SUB_ROLES = [
+  "sales_admin",
+  "purchase_admin",
+  "ppc_admin",
+];
+
 export const authorizeRoles = (...allowedRoles) => {
   return (req, res, next) => {
     if (!allowedRoles || allowedRoles.length === 0) {
@@ -48,6 +66,24 @@ export const authorizeRoles = (...allowedRoles) => {
 
     next();
   };
+};
+
+export const authorizeAdminPanel = (req, res, next) => {
+  if (!req.user || !req.user.role) {
+    return res.status(403).json({
+      success: false,
+      message: "Access denied: role not found",
+    });
+  }
+
+  if (!ADMIN_PANEL_ROLES.includes(req.user.role)) {
+    return res.status(403).json({
+      success: false,
+      message: "Access denied: insufficient permissions",
+    });
+  }
+
+  next();
 };
 
 export const authorizeSubRoles = (...allowedSubRoles) => {

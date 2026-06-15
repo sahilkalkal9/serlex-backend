@@ -3,16 +3,28 @@ import User from "../models/User.js";
 import UserAllocation from "../models/UserAllocation.js";
 import SalesTarget from "../models/SalesTarget.js";
 import ManagerTarget from "../models/ManagerTarget.js";
+import { getDepartmentFilter } from "../utils/departmentFilter.js";
 
 const isAdmin = (user) => {
-  return ["admin", "superadmin"].includes(user?.role);
+  return ["admin", "superadmin", "radmin"].includes(user?.role);
 };
 
 const getUserId = (req) => {
   return req.user?._id || req.user?.id || null;
 };
 
-// Allocate a sales user to a sales manager
+const getRoleConfig = (user) => {
+  const subRole = user?.subRole || "";
+  if (subRole === "purchase_admin") {
+    return { managerSubRole: "po_manager", userRole: "purchase_user" };
+  }
+  if (subRole === "ppc_admin") {
+    return { managerSubRole: "ppc_manager", userRole: "ppc_user" };
+  }
+  return { managerSubRole: "sales_manager", userRole: "sales_user" };
+};
+
+// Allocate a user to a manager
 export const allocateUserToManager = async (req, res) => {
   try {
     if (!isAdmin(req.user)) {
@@ -23,38 +35,47 @@ export const allocateUserToManager = async (req, res) => {
     }
 
     const { salesUserId, salesManagerId, remarks = "" } = req.body;
+    const { userRole, managerSubRole } = getRoleConfig(req.user);
 
     if (!salesUserId || !salesManagerId) {
       return res.status(400).json({
         success: false,
-        message: "Sales user ID and sales manager ID are required",
+        message: "User ID and manager ID are required",
       });
     }
 
-    // Verify sales user exists
-    const salesUser = await User.findOne({
+    // Verify user exists with correct role
+    const targetUser = await User.findOne({
       _id: salesUserId,
-      role: "sales_user",
+      role: userRole,
     });
 
-    if (!salesUser) {
+    if (!targetUser) {
       return res.status(404).json({
         success: false,
-        message: "Sales user not found",
+        message: `${userRole.replace("_", " ")} not found`,
       });
     }
 
-    // Verify sales manager exists
-    const salesManager = await User.findOne({
+    const department = getDepartmentFilter(req.user);
+    if (department && targetUser.department !== department) {
+      return res.status(403).json({
+        success: false,
+        message: `You can only allocate users in the ${department} department`,
+      });
+    }
+
+    // Verify manager exists
+    const manager = await User.findOne({
       _id: salesManagerId,
       role: "subadmin",
-      subRole: "sales_manager",
+      subRole: managerSubRole,
     });
 
-    if (!salesManager) {
+    if (!manager) {
       return res.status(404).json({
         success: false,
-        message: "Sales manager not found",
+        message: "Manager not found",
       });
     }
 
@@ -292,7 +313,7 @@ const getPeriodDateRange = (period, periodKey) => {
   return { startDate, endDate };
 };
 
-// Get all sales managers with their allocated users and targets
+// Get all managers with their allocated users and targets
 export const getManagersWithAllocations = async (req, res) => {
   try {
     if (!isAdmin(req.user)) {
@@ -303,12 +324,19 @@ export const getManagersWithAllocations = async (req, res) => {
     }
 
     const { period = "Monthly", periodKey } = req.query;
+    const department = getDepartmentFilter(req.user);
+    const { managerSubRole, userRole } = getRoleConfig(req.user);
 
-    // Get all sales managers
-    const managers = await User.find({
+    const managerQuery = {
       role: "subadmin",
-      subRole: "sales_manager",
-    }).select("name email employeeId designation department");
+      subRole: managerSubRole,
+    };
+    if (department) {
+      managerQuery.department = department;
+    }
+
+    const managers = await User.find(managerQuery)
+      .select("name email employeeId designation department");
 
     const { default: PurchaseOrder } = await import("../models/PurchaseOrder.js");
     const dateRange = period && periodKey ? getPeriodDateRange(period, periodKey) : null;
@@ -482,6 +510,7 @@ export const bulkAllocateUsers = async (req, res) => {
     }
 
     const { salesManagerId, userIds, remarks = "" } = req.body;
+    const { managerSubRole, userRole } = getRoleConfig(req.user);
 
     if (!salesManagerId || !Array.isArray(userIds) || userIds.length === 0) {
       return res.status(400).json({
@@ -494,7 +523,7 @@ export const bulkAllocateUsers = async (req, res) => {
     const salesManager = await User.findOne({
       _id: salesManagerId,
       role: "subadmin",
-      subRole: "sales_manager",
+      subRole: managerSubRole,
     });
 
     if (!salesManager) {
@@ -502,6 +531,22 @@ export const bulkAllocateUsers = async (req, res) => {
         success: false,
         message: "Sales manager not found",
       });
+    }
+
+    const deptFilter = getDepartmentFilter(req.user);
+    if (deptFilter) {
+      const validUsers = await User.find({
+        _id: { $in: userIds },
+        department: deptFilter,
+      }).select("_id").lean();
+      const validUserIds = validUsers.map((u) => String(u._id));
+      const invalidUsers = userIds.filter((id) => !validUserIds.includes(String(id)));
+      if (invalidUsers.length > 0) {
+        return res.status(403).json({
+          success: false,
+          message: `You can only allocate users in the ${deptFilter} department`,
+        });
+      }
     }
 
     // Check for already allocated users
@@ -557,7 +602,7 @@ export const bulkAllocateUsers = async (req, res) => {
   }
 };
 
-// Get unallocated sales users (for admin allocation page)
+// Get unallocated users (for admin allocation page)
 export const getUnallocatedSalesUsers = async (req, res) => {
   try {
     if (!isAdmin(req.user)) {
@@ -568,11 +613,18 @@ export const getUnallocatedSalesUsers = async (req, res) => {
     }
 
     const { search = "" } = req.query;
+    const department = getDepartmentFilter(req.user);
+    const { userRole } = getRoleConfig(req.user);
 
-    // Get all sales users
-    const allSalesUsers = await User.find({
-      role: "sales_user",
-    }).select("name email employeeId designation department");
+    const userQuery = {
+      role: userRole,
+    };
+    if (department) {
+      userQuery.department = department;
+    }
+
+    const allUsers = await User.find(userQuery)
+      .select("name email employeeId designation department");
 
     // Get all actively allocated users
     const allocatedUserIds = await UserAllocation.find({
@@ -580,7 +632,7 @@ export const getUnallocatedSalesUsers = async (req, res) => {
     }).distinct("salesUser");
 
     // Filter unallocated users
-    let unallocatedUsers = allSalesUsers.filter(
+    let unallocatedUsers = allUsers.filter(
       (user) =>
         !allocatedUserIds.some((allocId) => String(allocId) === String(user._id))
     );

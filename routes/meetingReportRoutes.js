@@ -14,7 +14,7 @@ import {
 const router = express.Router();
 
 const allowMeetingReportWriteAccess = (req, res, next) => {
-  if (["sales_user", "admin", "superadmin"].includes(req.user.role)) {
+  if (["sales_user", "admin", "superadmin", "radmin"].includes(req.user.role)) {
     return next();
   }
 

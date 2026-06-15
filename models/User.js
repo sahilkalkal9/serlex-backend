@@ -81,6 +81,7 @@ const userSchema = new mongoose.Schema(
       enum: [
         "superadmin",
         "admin",
+        "radmin",
         "subadmin",
         "sales_user",
         "purchase_user",
@@ -93,6 +94,9 @@ const userSchema = new mongoose.Schema(
       type: String,
       enum: [
         "",
+        "sales_admin",
+        "purchase_admin",
+        "ppc_admin",
         "sales_manager",
         "po_manager",
         "ppc_manager",

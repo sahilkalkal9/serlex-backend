@@ -5,6 +5,7 @@ import MeetingReport from "../models/MeetingReport.js";
 import PurchaseOrder from "../models/PurchaseOrder.js";
 import User from "../models/User.js";
 import UserAllocation from "../models/UserAllocation.js";
+import { getDepartmentFilter } from "../utils/departmentFilter.js";
 
 const getDateRange = (fromDate, toDate) => {
   const now = new Date();
@@ -21,14 +22,52 @@ const getDateRange = (fromDate, toDate) => {
 export const getAdminDashboard = async (req, res) => {
   try {
     const { start, end } = getDateRange(req.query.fromDate, req.query.toDate);
+    const department = getDepartmentFilter(req.user);
+
+    let departmentUserIds = null;
+    if (department) {
+      const deptUsers = await User.find({
+        department,
+        status: { $ne: "inactive" },
+      })
+        .select("_id")
+        .lean();
+      departmentUserIds = deptUsers.map((u) => u._id);
+    }
 
     const meetingRangeQuery = {
       startTime: { $gte: start, $lte: end },
     };
+    if (departmentUserIds) {
+      meetingRangeQuery.createdBy = { $in: departmentUserIds };
+    }
 
     const poRangeQuery = {
       poDate: { $gte: start, $lte: end },
     };
+    if (departmentUserIds) {
+      poRangeQuery.createdBy = { $in: departmentUserIds };
+    }
+
+    const activityRangeQuery = {
+      loginTime: { $gte: start, $lte: end },
+    };
+    if (departmentUserIds) {
+      activityRangeQuery.user = { $in: departmentUserIds };
+    }
+
+    const userBaseQuery = { status: { $ne: "inactive" } };
+    if (department) {
+      userBaseQuery.department = department;
+    }
+
+    const nonAdminBaseQuery = {
+      status: { $ne: "inactive" },
+      role: { $nin: ["superadmin", "admin", "radmin"] },
+    };
+    if (department) {
+      nonAdminBaseQuery.department = department;
+    }
 
     const [
       meetingsScheduled,
@@ -58,7 +97,7 @@ export const getAdminDashboard = async (req, res) => {
         approvalStatus: "pending",
       }),
       PurchaseOrder.countDocuments(poRangeQuery),
-      User.countDocuments({ status: { $ne: "inactive" } }),
+      User.countDocuments(userBaseQuery),
       Meeting.find(meetingRangeQuery)
         .select("title startTime status approvalStatus createdBy")
         .populate("createdBy", "name email role subRole")
@@ -70,25 +109,24 @@ export const getAdminDashboard = async (req, res) => {
         .sort({ _id: -1 })
         .limit(5)
         .lean(),
-      Activity.find({
-        loginTime: { $gte: start, $lte: end },
-      })
+      Activity.find(activityRangeQuery)
         .populate("user", "name email role subRole")
         .sort({ _id: -1 })
         .limit(5)
         .lean(),
-      Activity.find({
-        loginTime: { $gte: start, $lte: end },
-      }).sort({ _id: -1 }).populate("user", "name department role").lean(),
-      User.countDocuments({ status: { $ne: "inactive" } }),
-      User.countDocuments({ status: { $ne: "inactive" }, role: { $nin: ["superadmin", "admin"] } }),
+      Activity.find(activityRangeQuery)
+        .sort({ _id: -1 })
+        .populate("user", "name department role")
+        .lean(),
+      User.countDocuments(userBaseQuery),
+      User.countDocuments(nonAdminBaseQuery),
     ]);
 
     const userMap = {};
     rangeActivities.forEach((a) => {
       const uid = String(a.user?._id || a.user);
       const role = a.user?.role;
-      if (role && ["superadmin", "admin"].includes(role)) return;
+      if (role && ["superadmin", "admin", "radmin"].includes(role)) return;
       if (!userMap[uid]) {
         userMap[uid] = { loginCount: 0, hasLogout: false };
       }
@@ -131,8 +169,12 @@ export const getAdminDashboard = async (req, res) => {
 
 export const getAdminUsers = async (req, res) => {
   try {
+    const department = getDepartmentFilter(req.user);
     const query =
       req.query.includeInactive === "true" ? {} : { status: { $ne: "inactive" } };
+    if (department) {
+      query.department = department;
+    }
     const users = await User.find(query)
       .select("name email employeeId mobileNumber department designation managerName territory joiningDate dob username role subRole status isApprovedByAdmin deviceId createdAt")
       .sort({ _id: -1 })
@@ -195,9 +237,20 @@ export const createAdminUser = async (req, res) => {
       });
     }
 
-    const allowedRoles = ["admin", "subadmin", "sales_user", "purchase_user", "ppc_user"];
+    const radminDepartment = getDepartmentFilter(req.user);
+    if (radminDepartment && department.trim() !== radminDepartment) {
+      return res.status(403).json({
+        success: false,
+        message: `You can only create users in the ${radminDepartment} department`,
+      });
+    }
+
+    const allowedRoles = ["admin", "radmin", "subadmin", "sales_user", "purchase_user", "ppc_user"];
     const allowedSubRoles = [
       "",
+      "sales_admin",
+      "purchase_admin",
+      "ppc_admin",
       "sales_manager",
       "po_manager",
       "ppc_manager",
@@ -213,10 +266,10 @@ export const createAdminUser = async (req, res) => {
       });
     }
 
-    if (role === "subadmin" && !subRole) {
+    if ((role === "subadmin" || role === "radmin") && !subRole) {
       return res.status(400).json({
         success: false,
-        message: "Manager role is required",
+        message: "Admin/Manager type is required",
       });
     }
 
@@ -266,7 +319,7 @@ export const createAdminUser = async (req, res) => {
       dob,
       password: hashedDefaultPassword,
       role,
-      subRole: role === "subadmin" ? subRole : "",
+      subRole: (role === "subadmin" || role === "radmin") ? subRole : "",
       status: status || "approved",
       isApprovedByAdmin: true,
       pin: hashedPin,
@@ -292,16 +345,31 @@ export const createAdminUser = async (req, res) => {
 
 export const getAdminHierarchy = async (req, res) => {
   try {
-    const users = await User.find({ status: { $ne: "inactive" } })
+    const department = getDepartmentFilter(req.user);
+
+    const userQuery = { status: { $ne: "inactive" } };
+    if (department) {
+      userQuery.department = department;
+    }
+
+    const users = await User.find(userQuery)
       .select("name email employeeId mobileNumber department designation managerName territory role subRole status")
       .sort({ role: 1, name: 1 })
       .lean();
 
-    const allocations = await UserAllocation.find({ isActive: true })
+    let allocations = await UserAllocation.find({ isActive: true })
       .populate("salesManager", "name email employeeId department designation subRole")
       .populate("salesUser", "name email employeeId department designation mobileNumber")
       .sort({ _id: -1 })
       .lean();
+
+    if (department) {
+      allocations = allocations.filter((a) => {
+        const mgrDept = a.salesManager?.department;
+        const usrDept = a.salesUser?.department;
+        return mgrDept === department || usrDept === department;
+      });
+    }
 
     // Build manager → allocated users map
     const managerMap = {};
@@ -359,6 +427,17 @@ export const updateAdminUserStatus = async (req, res) => {
       });
     }
 
+    const department = getDepartmentFilter(req.user);
+    if (department) {
+      const targetUser = await User.findById(req.params.id).select("department").lean();
+      if (!targetUser || targetUser.department !== department) {
+        return res.status(403).json({
+          success: false,
+          message: "You can only update users in your department",
+        });
+      }
+    }
+
     const user = await User.findByIdAndUpdate(
       req.params.id,
       {
@@ -396,6 +475,17 @@ export const updateAdminUserStatus = async (req, res) => {
 
 export const approveAdminUser = async (req, res) => {
   try {
+    const department = getDepartmentFilter(req.user);
+    if (department) {
+      const targetUser = await User.findById(req.params.id).select("department").lean();
+      if (!targetUser || targetUser.department !== department) {
+        return res.status(403).json({
+          success: false,
+          message: "You can only approve users in your department",
+        });
+      }
+    }
+
     const user = await User.findByIdAndUpdate(
       req.params.id,
       {
@@ -433,7 +523,19 @@ export const approveAdminUser = async (req, res) => {
 
 export const getAdminMeetings = async (req, res) => {
   try {
+    const department = getDepartmentFilter(req.user);
     const query = {};
+
+    if (department) {
+      const deptUsers = await User.find({
+        department,
+        status: { $ne: "inactive" },
+      })
+        .select("_id")
+        .lean();
+      const deptUserIds = deptUsers.map((u) => u._id);
+      query.createdBy = { $in: deptUserIds };
+    }
 
     if (req.query.fromDate || req.query.toDate) {
       const { start, end } = getDateRange(req.query.fromDate, req.query.toDate);
@@ -542,6 +644,14 @@ export const updateUserWorkingHours = async (req, res) => {
       return res.status(404).json({ success: false, message: "User not found" });
     }
 
+    const department = getDepartmentFilter(req.user);
+    if (department && user.department !== department) {
+      return res.status(403).json({
+        success: false,
+        message: "You can only update users in your department",
+      });
+    }
+
     if (startTime !== undefined) user.workingHours.startTime = startTime;
     if (endTime !== undefined) user.workingHours.endTime = endTime;
 
@@ -561,6 +671,14 @@ export const clearUserDevice = async (req, res) => {
     const user = await User.findById(id);
     if (!user) {
       return res.status(404).json({ success: false, message: "User not found" });
+    }
+
+    const department = getDepartmentFilter(req.user);
+    if (department && user.department !== department) {
+      return res.status(403).json({
+        success: false,
+        message: "You can only manage users in your department",
+      });
     }
 
     user.deviceId = "";

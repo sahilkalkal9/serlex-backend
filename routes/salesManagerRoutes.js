@@ -11,7 +11,7 @@ const router = express.Router();
 
 const salesManagerOnly = (req, res, next) => {
   const { role, subRole } = req.user;
-  if (role === "admin" || role === "superadmin") return next();
+  if (role === "admin" || role === "superadmin" || role === "radmin") return next();
   if (role === "subadmin" && subRole === "sales_manager") return next();
   return res.status(403).json({ success: false, message: "Access denied: sales manager only" });
 };

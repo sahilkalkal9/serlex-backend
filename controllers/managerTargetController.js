@@ -4,7 +4,7 @@ import User from "../models/User.js";
 import UserAllocation from "../models/UserAllocation.js";
 
 const isAdmin = (user) => {
-  return ["admin", "superadmin"].includes(user?.role);
+  return ["admin", "superadmin", "radmin"].includes(user?.role);
 };
 
 const isSalesManager = (user) => {

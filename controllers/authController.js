@@ -161,7 +161,7 @@ export const login = async (req, res) => {
       });
     }
 
-    if (!["superadmin", "admin"].includes(user.role) && !user.isApprovedByAdmin) {
+    if (!["superadmin", "admin", "radmin"].includes(user.role) && !user.isApprovedByAdmin) {
       return res.status(403).json({
         success: false,
         message: "Account pending admin approval. Please contact your administrator.",
@@ -170,7 +170,7 @@ export const login = async (req, res) => {
 
     const isTestUser = user.employeeId?.toLowerCase().includes("test");
 
-    if (!["superadmin", "admin"].includes(user.role) && !isTestUser && user.deviceId && deviceId && user.deviceId !== deviceId) {
+    if (!["superadmin", "admin", "radmin"].includes(user.role) && !isTestUser && user.deviceId && deviceId && user.deviceId !== deviceId) {
       return res.status(403).json({
         success: false,
         message: "This device is not recognized. Please login from your registered device.",
@@ -190,7 +190,7 @@ export const login = async (req, res) => {
       });
     }
 
-    if (!["superadmin", "admin"].includes(user.role) && !isTestUser && deviceId && !user.deviceId) {
+    if (!["superadmin", "admin", "radmin"].includes(user.role) && !isTestUser && deviceId && !user.deviceId) {
       user.deviceId = deviceId;
       await user.save();
     }

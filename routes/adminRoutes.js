@@ -22,38 +22,38 @@ import {
   getAdminTargetAchievementReport,
 } from "../controllers/adminReportController.js";
 
-import { authorizeRoles, protect } from "../middlewares/authMiddleware.js";
+import { authorizeRoles, protect, authorizeAdminPanel } from "../middlewares/authMiddleware.js";
 
 const router = express.Router();
 
-router.get("/dashboard", protect, authorizeRoles("admin"), getAdminDashboard);
+router.get("/dashboard", protect, authorizeAdminPanel, getAdminDashboard);
 
 // Users
-router.get("/users", protect, authorizeRoles("admin"), getAdminUsers);
-router.post("/users", protect, authorizeRoles("admin"), createAdminUser);
+router.get("/users", protect, authorizeAdminPanel, getAdminUsers);
+router.post("/users", protect, authorizeAdminPanel, createAdminUser);
 router.patch(
   "/users/:id/status",
   protect,
-  authorizeRoles("admin"),
+  authorizeAdminPanel,
   updateAdminUserStatus
 );
 router.patch(
   "/users/:id/approve",
   protect,
-  authorizeRoles("admin"),
+  authorizeAdminPanel,
   approveAdminUser
 );
 
 router.patch(
   "/users/:id/working-hours",
   protect,
-  authorizeRoles("admin"),
+  authorizeAdminPanel,
   updateUserWorkingHours
 );
 router.patch(
   "/users/:id/clear-device",
   protect,
-  authorizeRoles("admin"),
+  authorizeAdminPanel,
   clearUserDevice
 );
 
@@ -61,46 +61,46 @@ router.patch(
 router.get(
   "/hierarchy",
   protect,
-  authorizeRoles("admin"),
+  authorizeAdminPanel,
   getAdminHierarchy
 );
 
 // Meetings
-router.get("/meetings", protect, authorizeRoles("admin"), getAdminMeetings);
+router.get("/meetings", protect, authorizeAdminPanel, getAdminMeetings);
 
 // Reports
 router.get(
   "/reports/overview",
   protect,
-  authorizeRoles("admin"),
+  authorizeAdminPanel,
   getAdminReportsOverview
 );
-router.get("/reports/sales", protect, authorizeRoles("admin"), getAdminSalesReport);
-router.get("/reports/po", protect, authorizeRoles("admin"), getAdminPoReport);
+router.get("/reports/sales", protect, authorizeAdminPanel, getAdminSalesReport);
+router.get("/reports/po", protect, authorizeAdminPanel, getAdminPoReport);
 router.get(
   "/reports/attendance",
   protect,
-  authorizeRoles("admin"),
+  authorizeAdminPanel,
   getAdminAttendanceReport
 );
 router.get(
   "/reports/target-achievement",
   protect,
-  authorizeRoles("admin"),
+  authorizeAdminPanel,
   getAdminTargetAchievementReport
 );
 router.get(
   "/reports/login-logout",
   protect,
-  authorizeRoles("admin"),
+  authorizeAdminPanel,
   getAdminLoginLogoutReport
 );
 router.get(
   "/reports/meetings",
   protect,
-  authorizeRoles("admin"),
+  authorizeAdminPanel,
   getAdminMeetingAnalyticsReport
 );
-router.get("/reports/:type", protect, authorizeRoles("admin"), getAdminSimpleReport);
+router.get("/reports/:type", protect, authorizeAdminPanel, getAdminSimpleReport);
 
 export default router;

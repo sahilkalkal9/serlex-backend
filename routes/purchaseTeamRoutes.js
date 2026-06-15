@@ -18,10 +18,11 @@ import {
 
 const router = express.Router();
 
-const purchaseManagerAccess = ["admin", "subadmin", "superadmin"];
+const purchaseManagerAccess = ["admin", "radmin", "subadmin", "superadmin"];
 
 const purchaseTeamAccess = [
   "admin",
+  "radmin",
   "subadmin",
   "superadmin",
   "purchase_user",

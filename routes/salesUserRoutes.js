@@ -20,7 +20,7 @@ const router = express.Router();
 router.get(
   "/",
   protect,
-  authorizeRoles(["admin", "subadmin", "superadmin"]),
+  authorizeRoles(["admin", "radmin", "subadmin", "superadmin"]),
   getSalesUsers
 );
 
@@ -29,10 +29,12 @@ router.get(
   protect,
   authorizeRoles([
     "admin",
+    "radmin",
     "subadmin",
     "superadmin",
     "sales_user",
   ]),
+
   getSalesTeamUsers
 );
 
@@ -41,10 +43,12 @@ router.get(
   protect,
   authorizeRoles([
     "admin",
+    "radmin",
     "subadmin",
     "superadmin",
     "purchase_user",
   ]),
+
   getPurchaseTeamUsers
 );
 
@@ -53,6 +57,7 @@ router.get(
   protect,
   authorizeRoles([
     "admin",
+    "radmin",
     "subadmin",
     "superadmin",
     "ppc_user",
@@ -64,21 +69,21 @@ router.get(
 router.get(
   "/:id",
   protect,
-  authorizeRoles(["admin", "subadmin", "superadmin"]),
+  authorizeRoles(["admin", "radmin", "subadmin", "superadmin"]),
   getSalesUserById
 );
 
 router.put(
   "/:id",
   protect,
-  authorizeRoles(["admin", "subadmin", "superadmin"]),
+  authorizeRoles(["admin", "radmin", "subadmin", "superadmin"]),
   updateSalesUser
 );
 
 router.delete(
   "/:id",
   protect,
-  authorizeRoles(["admin", "subadmin", "superadmin"]),
+  authorizeRoles(["admin", "radmin", "subadmin", "superadmin"]),
   deleteSalesUser
 );
 

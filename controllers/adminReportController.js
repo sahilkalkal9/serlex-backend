@@ -7,6 +7,7 @@ import SalesTarget from "../models/SalesTarget.js";
 import ManagerTarget from "../models/ManagerTarget.js";
 import User from "../models/User.js";
 import UserAllocation from "../models/UserAllocation.js";
+import { getDepartmentFilter, shouldFilterByDepartment } from "../utils/departmentFilter.js";
 
 const monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
@@ -135,6 +136,11 @@ const getManagerTeamMapping = async (selectedManagers, salesUsers) => {
 
 const buildSalesData = async (start, end, filters = {}, currentUser = null) => {
   const { users, departments, salesManagers, salesUsers } = await getOptions();
+
+  const deptFilter = getDepartmentFilter(currentUser);
+  if (deptFilter && !filters.department) {
+    filters.department = deptFilter;
+  }
 
   // Determine relevant users based on filters
   let selectedManagers = [];
@@ -458,7 +464,9 @@ const buildSalesData = async (start, end, filters = {}, currentUser = null) => {
 export const getAdminReportsOverview = async (req, res) => {
   try {
     const { start, end } = getDateRange(req.query.fromDate, req.query.toDate);
-    const [options, poCount, usersCount, activitiesCount, meetingsCount, meetingReportsCount, targetsCount] = await Promise.all([
+    const department = getDepartmentFilter(req.user);
+
+    const [rawOptions, poCount, usersCount, activitiesCount, meetingsCount, meetingReportsCount, targetsCount] = await Promise.all([
       getOptions(),
       PurchaseOrder.countDocuments(dateQuery("poDate", start, end)),
       User.countDocuments({ status: { $ne: "inactive" } }),
@@ -467,6 +475,18 @@ export const getAdminReportsOverview = async (req, res) => {
       MeetingReport.countDocuments(dateQuery("meetingDateTime", start, end)),
       SalesTarget.countDocuments({ createdAt: { $lte: end } }),
     ]);
+
+    let options = rawOptions;
+    if (department) {
+      options = {
+        ...rawOptions,
+        departments: rawOptions.departments.filter((d) => d === department),
+        users: rawOptions.users.filter((u) => u.department === department),
+        salesManagers: rawOptions.salesManagers.filter((u) => u.department === department),
+        salesUsers: rawOptions.salesUsers.filter((u) => u.department === department),
+        teams: rawOptions.teams.filter((t) => t.id === department),
+      };
+    }
 
     const categories = [
       ["sales", "Sales Reports", "View sales report month wise.", Math.max(targetsCount, 1)],
@@ -514,8 +534,11 @@ export const getAdminLoginLogoutReport = async (req, res) => {
   try {
     const { start, end } = getDateRange(req.query.fromDate, req.query.toDate);
     const options = await getOptions();
+    const deptFilter = getDepartmentFilter(req.user);
+    const effectiveDepartment = deptFilter || req.query.department;
+
     const selectedUsers = options.users.filter((user) => {
-      if (req.query.department && req.query.department !== "all" && user.department !== req.query.department) return false;
+      if (effectiveDepartment && effectiveDepartment !== "all" && user.department !== effectiveDepartment) return false;
       if (req.query.role && req.query.role !== "all" && user.role !== req.query.role) return false;
       if (req.query.employee && req.query.employee !== "all" && asId(user) !== req.query.employee) return false;
       return true;
@@ -664,7 +687,17 @@ export const getAdminMeetingAnalyticsReport = async (req, res) => {
   try {
     const { start, end } = getDateRange(req.query.fromDate, req.query.toDate);
     const options = await getOptions();
-    const meetings = await Meeting.find(dateQuery("startTime", start, end))
+    const deptFilter = getDepartmentFilter(req.user);
+
+    const meetingQuery = dateQuery("startTime", start, end);
+    if (deptFilter) {
+      const deptUserIds = options.users
+        .filter((u) => u.department === deptFilter)
+        .map((u) => u._id);
+      meetingQuery.createdBy = { $in: deptUserIds };
+    }
+
+    const meetings = await Meeting.find(meetingQuery)
       .sort({ _id: -1 })
       .populate("createdBy", "name department designation")
       .lean();
@@ -849,11 +882,13 @@ export const getAdminPoReport = async (req, res) => {
   try {
     const { start, end } = getDateRange(req.query.fromDate, req.query.toDate);
     const options = await getOptions();
+    const deptFilter = getDepartmentFilter(req.user);
     const query = dateQuery("poDate", start, end);
     if (req.query.salesManager && req.query.salesManager !== "all") {
       query.createdBy = req.query.salesManager;
-    } else if (req.query.department && req.query.department !== "all") {
-      const ids = options.users.filter((user) => user.department === req.query.department).map((user) => user._id);
+    } else if (deptFilter || (req.query.department && req.query.department !== "all")) {
+      const effectiveDept = deptFilter || req.query.department;
+      const ids = options.users.filter((user) => user.department === effectiveDept).map((user) => user._id);
       query.createdBy = { $in: ids };
     }
 
@@ -920,7 +955,10 @@ export const getAdminAttendanceReport = async (req, res) => {
   try {
     const { start, end } = getDateRange(req.query.fromDate, req.query.toDate);
     const options = await getOptions();
-    let users = options.users.filter((user) => !req.query.department || req.query.department === "all" || user.department === req.query.department);
+    const deptFilter = getDepartmentFilter(req.user);
+    const effectiveDepartment = deptFilter || req.query.department;
+
+    let users = options.users.filter((user) => !effectiveDepartment || effectiveDepartment === "all" || user.department === effectiveDepartment);
     if (req.query.role && req.query.role !== "all") {
       users = users.filter((user) => user.role === req.query.role);
     }
@@ -1200,12 +1238,14 @@ export const getAdminSimpleReport = async (req, res) => {
   try {
     const { start, end } = getDateRange(req.query.fromDate, req.query.toDate);
     const options = await getOptions();
+    const deptFilter = getDepartmentFilter(req.user);
     const activityQuery = dateQuery("loginTime", start, end);
     const meetingQuery = dateQuery("startTime", start, end);
 
     let filterUserIds = options.users.map((u) => u._id);
-    if (req.query.department && req.query.department !== "all") {
-      filterUserIds = filterUserIds.filter((id) => options.users.some((u) => asId(u._id) === asId(id) && u.department === req.query.department));
+    const effectiveDepartment = deptFilter || req.query.department;
+    if (effectiveDepartment && effectiveDepartment !== "all") {
+      filterUserIds = filterUserIds.filter((id) => options.users.some((u) => asId(u._id) === asId(id) && u.department === effectiveDepartment));
     }
     if (req.query.role && req.query.role !== "all") {
       filterUserIds = filterUserIds.filter((id) => options.users.some((u) => asId(u._id) === asId(id) && u.role === req.query.role));

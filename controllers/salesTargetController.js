@@ -9,7 +9,7 @@ const isSalesManager = (user) => {
 };
 
 const isAdmin = (user) => {
-  return ["admin", "superadmin"].includes(user?.role);
+  return ["admin", "superadmin", "radmin"].includes(user?.role);
 };
 
 const canAccessTargetModule = (user) => {

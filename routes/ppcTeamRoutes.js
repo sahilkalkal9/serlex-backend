@@ -14,13 +14,13 @@ const router = express.Router();
 
 router.use(protect);
 
-router.get("/members", authorizeRoles("subadmin", "admin", "superadmin"), getPpcMembers);
-router.post("/members", authorizeRoles("subadmin", "admin", "superadmin"), createPpcMember);
-router.patch("/members/:id", authorizeRoles("subadmin", "admin", "superadmin"), updatePpcMember);
-router.delete("/members/:id", authorizeRoles("subadmin", "admin", "superadmin"), deletePpcMember);
+router.get("/members", authorizeRoles("subadmin", "admin", "superadmin", "radmin"), getPpcMembers);
+router.post("/members", authorizeRoles("subadmin", "admin", "superadmin", "radmin"), createPpcMember);
+router.patch("/members/:id", authorizeRoles("subadmin", "admin", "superadmin", "radmin"), updatePpcMember);
+router.delete("/members/:id", authorizeRoles("subadmin", "admin", "superadmin", "radmin"), deletePpcMember);
 
-router.get("/meetings", authorizeRoles("subadmin", "admin", "superadmin"), getPpcTeamMeetings);
-router.patch("/meetings/:id/approval", authorizeRoles("subadmin", "admin", "superadmin"), updatePpcMeetingApproval);
-router.patch("/meetings/:id/status", authorizeRoles("subadmin", "admin", "superadmin"), updatePpcMeetingStatus);
+router.get("/meetings", authorizeRoles("subadmin", "admin", "superadmin", "radmin"), getPpcTeamMeetings);
+router.patch("/meetings/:id/approval", authorizeRoles("subadmin", "admin", "superadmin", "radmin"), updatePpcMeetingApproval);
+router.patch("/meetings/:id/status", authorizeRoles("subadmin", "admin", "superadmin", "radmin"), updatePpcMeetingStatus);
 
 export default router;

@@ -2137,7 +2137,7 @@ export const getSalesManagerPOTrackingOrders = async (req, res) => {
     const isSalesManager =
       req.user?.role === "subadmin" && req.user?.subRole === "sales_manager";
 
-    const isAdmin = ["admin", "superadmin"].includes(req.user?.role);
+    const isAdmin = ["admin", "superadmin", "radmin"].includes(req.user?.role);
 
     if (!isSalesManager && !isAdmin) {
       return res.status(403).json({

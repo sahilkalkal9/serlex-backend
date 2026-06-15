@@ -5,7 +5,7 @@ import User from "../models/User.js";
 import Lead from "../models/Lead.js";
 
 const isAdminUser = (user) => {
-  return ["admin", "superadmin"].includes(user?.role);
+  return ["admin", "superadmin", "radmin"].includes(user?.role);
 };
 
 const isSalesManager = (user) => {

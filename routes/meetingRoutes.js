@@ -22,6 +22,7 @@ const router = express.Router();
 
 const commonMeetingAccess = [
   "admin",
+  "radmin",
   "subadmin",
   "superadmin",
   "sales_user",
@@ -29,7 +30,7 @@ const commonMeetingAccess = [
   "ppc_user",
 ];
 
-const managerAccess = ["admin", "subadmin", "superadmin"];
+const managerAccess = ["admin", "radmin", "subadmin", "superadmin"];
 
 /**
  * Sales users meetings
@@ -50,7 +51,7 @@ router.get(
 router.get(
   "/purchase",
   protect,
-  authorizeRoles(["admin", "subadmin", "superadmin", "purchase_user"]),
+  authorizeRoles(["admin", "radmin", "subadmin", "superadmin", "purchase_user"]),
   getPurchaseMeetings
 );
 
@@ -61,7 +62,7 @@ router.get(
 router.get(
   "/ppc",
   protect,
-  authorizeRoles(["admin", "subadmin", "superadmin", "ppc_user"]),
+  authorizeRoles(["admin", "radmin", "subadmin", "superadmin", "ppc_user"]),
   getPpcMeetings
 );
 

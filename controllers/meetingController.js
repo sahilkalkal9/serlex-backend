@@ -298,7 +298,7 @@ export const updateMeetingStatus = async (req, res) => {
     }
 
     const isOwner = meeting.createdBy?._id?.toString() === req.user.id;
-    const isAdmin = ["admin", "superadmin"].includes(req.user.role);
+    const isAdmin = ["admin", "superadmin", "radmin"].includes(req.user.role);
     const isSalesManager =
       req.user.role === "subadmin" && req.user.subRole === "sales_manager";
 
@@ -493,7 +493,7 @@ export const updateMeetingApprovalStatus = async (req, res) => {
       });
     }
 
-    const isAdmin = ["admin", "superadmin"].includes(req.user.role);
+    const isAdmin = ["admin", "superadmin", "radmin"].includes(req.user.role);
     const isSalesManager =
       req.user.role === "subadmin" && req.user.subRole === "sales_manager";
 

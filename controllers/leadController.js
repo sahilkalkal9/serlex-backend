@@ -7,7 +7,7 @@ const isSalesManager = (user) => {
 };
 
 const isLeadViewer = (user) => {
-  return ["admin", "superadmin"].includes(user?.role) || isSalesManager(user);
+  return ["admin", "superadmin", "radmin"].includes(user?.role) || isSalesManager(user);
 };
 
 const getDerivedLeadStatus = (latestReport, leadStatus) => {
