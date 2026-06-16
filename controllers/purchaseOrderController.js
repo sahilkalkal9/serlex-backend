@@ -1,4 +1,5 @@
 import PurchaseOrder from "../models/PurchaseOrder.js";
+import { getSocketIO } from "../socket.js";
 
 const formatMoney = (amount = 0) => {
   if (amount >= 10000000) return `₹ ${(amount / 10000000).toFixed(2)} Cr`;
@@ -154,6 +155,14 @@ export const createPurchaseOrder = async (req, res) => {
       createdBy: getUserId(req),
     });
 
+    const io = getSocketIO();
+    if (io) {
+      const dept = purchaseOrder.category === "Trading" ? "Sales" : (purchaseOrder.category === "Purchase" ? "Purchase" : null);
+      io.to("room:admin").emit("po:updated", { type: "created", poId: purchaseOrder._id, poValue: purchaseOrder.poValue });
+      io.to("room:radmin").emit("po:updated", { type: "created", poValue: purchaseOrder.poValue });
+      if (dept) io.to(`dept:${dept}`).emit("po:updated", { type: "created", poValue: purchaseOrder.poValue });
+    }
+
     return res.status(201).json({
       success: true,
       message: "Purchase order created successfully",
@@ -210,6 +219,12 @@ export const updatePurchaseOrderApproval = async (req, res) => {
         success: false,
         message: "Purchase order not found",
       });
+    }
+
+    const io = getSocketIO();
+    if (io) {
+      io.to("room:admin").emit("po:updated", { type: "updated", poId: order._id, poValue: order.poValue });
+      io.to("room:radmin").emit("po:updated", { type: "updated", poValue: order.poValue });
     }
 
     return res.status(200).json({
@@ -313,6 +328,12 @@ export const updateApprovedPOProcessing = async (req, res) => {
       .populate("approvedBy", "name email designation")
       .populate("processedBy", "name email designation")
       .populate("createdBy", "name email designation");
+
+    const io = getSocketIO();
+    if (io) {
+      io.to("room:admin").emit("po:updated", { type: "updated", poId: updatedOrder._id, poValue: updatedOrder.poValue });
+      io.to("room:radmin").emit("po:updated", { type: "updated", poValue: updatedOrder.poValue });
+    }
 
     return res.status(200).json({
       success: true,
@@ -970,6 +991,12 @@ export const updateMyDailyActivityOrder = async (req, res) => {
       .populate("processedBy", "name email designation role subRole")
       .populate("statusLogs.updatedBy", "name email designation role subRole");
 
+    const io = getSocketIO();
+    if (io) {
+      io.to("room:admin").emit("po:updated", { type: "updated", poId: updatedOrder._id, poValue: updatedOrder.poValue });
+      io.to("room:radmin").emit("po:updated", { type: "updated", poValue: updatedOrder.poValue });
+    }
+
     return res.status(200).json({
       success: true,
       message: "Activity updated successfully",
@@ -1557,6 +1584,12 @@ export const updatePOTrackingOrder = async (req, res) => {
       });
     }
 
+    const io = getSocketIO();
+    if (io) {
+      io.to("room:admin").emit("po:updated", { type: "updated", poId: order._id, poValue: order.poValue });
+      io.to("room:radmin").emit("po:updated", { type: "updated", poValue: order.poValue });
+    }
+
     return res.status(200).json({
       success: true,
       message: "PO tracking updated successfully",
@@ -2117,6 +2150,12 @@ export const updatePOActionStatus = async (req, res) => {
       .populate("processedBy", "name email designation role subRole")
       .populate("createdBy", "name email designation role subRole")
       .populate("statusLogs.updatedBy", "name email designation role subRole");
+
+    const io = getSocketIO();
+    if (io) {
+      io.to("room:admin").emit("po:updated", { type: "updated", poId: updatedOrder._id, poValue: updatedOrder.poValue });
+      io.to("room:radmin").emit("po:updated", { type: "updated", poValue: updatedOrder.poValue });
+    }
 
     return res.status(200).json({
       success: true,

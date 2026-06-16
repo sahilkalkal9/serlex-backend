@@ -5,6 +5,7 @@ import SalesTarget from "../models/SalesTarget.js";
 import ManagerTarget from "../models/ManagerTarget.js";
 import ManagerAdminAllocation from "../models/ManagerAdminAllocation.js";
 import { getDepartmentFilter } from "../utils/departmentFilter.js";
+import { getSocketIO } from "../socket.js";
 
 const isAdmin = (user) => {
   return ["admin", "superadmin", "radmin"].includes(user?.role);
@@ -187,6 +188,14 @@ export const deallocateUserFromManager = async (req, res) => {
       { path: "salesUser", select: "name email employeeId designation" },
       { path: "salesManager", select: "name email employeeId designation" },
     ]);
+
+    const io = getSocketIO();
+    if (io) {
+      const radminId = req.user?._id || req.user?.id;
+      io.to("room:radmin").emit("allocation:changed", { type: "user_deallocated" });
+      if (radminId) io.to(`user:${radminId}`).emit("allocation:changed", { type: "user_deallocated" });
+      io.to(`user:${allocation.salesManager}`).emit("allocation:changed", { type: "user_deallocated" });
+    }
 
     return res.status(200).json({
       success: true,
@@ -642,6 +651,14 @@ export const bulkAllocateUsers = async (req, res) => {
     })
       .populate("salesUser", "name email employeeId designation")
       .populate("salesManager", "name email employeeId designation");
+
+    const io = getSocketIO();
+    if (io) {
+      const radminId = req.user?._id || req.user?.id;
+      io.to("room:radmin").emit("allocation:changed", { type: "users_allocated", count: availableUserIds.length });
+      if (radminId) io.to(`user:${radminId}`).emit("allocation:changed", { type: "users_allocated", count: availableUserIds.length });
+      io.to(`user:${salesManagerId}`).emit("allocation:changed", { type: "users_allocated", count: availableUserIds.length });
+    }
 
     return res.status(201).json({
       success: true,

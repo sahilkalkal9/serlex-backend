@@ -18,6 +18,7 @@ export const initializeSocket = (server) => {
         "https://serlex-sales-frontend.vercel.app",
         "https://serlex-purchase-frontend.vercel.app",
         "https://serlex-admin-frontend.vercel.app",
+        "https://serlex-radmin-frontend.vercel.app",
         "https://serlex-ppc.vercel.app",
         "https://sales.serlextechnologies.com",
         "https://admin.serlextechnologies.com",
@@ -47,6 +48,8 @@ export const initializeSocket = (server) => {
         id: user._id.toString(),
         employeeId: user.employeeId,
         role: user.role,
+        subRole: user.subRole,
+        department: user.department,
       };
 
       next();
@@ -56,12 +59,27 @@ export const initializeSocket = (server) => {
   });
 
   io.on("connection", (socket) => {
-    console.log(`🔌 User connected: ${socket.user.employeeId} (${socket.id})`);
+    const { id, role, subRole, department, employeeId } = socket.user;
+    console.log(`\u{1F50C} User connected: ${employeeId} (${role}/${subRole}) [${socket.id}]`);
 
-    socket.join(`user:${socket.user.id}`);
+    socket.join(`user:${id}`);
+
+    if (role === "admin" || role === "superadmin") {
+      socket.join("room:admin");
+    }
+
+    if (role === "radmin") {
+      socket.join("room:radmin");
+      if (department) socket.join(`dept:${department}`);
+    }
+
+    if (role === "subadmin" && subRole) {
+      const dept = getDeptFromSubRole(subRole);
+      if (dept) socket.join(`dept:${dept}`);
+    }
 
     socket.on("disconnect", () => {
-      console.log(`🔌 User disconnected: ${socket.user.employeeId} (${socket.id})`);
+      console.log(`\u{1F50C} User disconnected: ${employeeId} [${socket.id}]`);
     });
 
     socket.on("ping", (callback) => {
@@ -71,8 +89,15 @@ export const initializeSocket = (server) => {
     });
   });
 
-  console.log("✅ Socket.IO initialized");
+  console.log("\u2705 Socket.IO initialized");
   return io;
+};
+
+const getDeptFromSubRole = (subRole) => {
+  if (subRole?.startsWith("sales")) return "Sales";
+  if (subRole?.startsWith("purchase") || subRole?.startsWith("po")) return "Purchase";
+  if (subRole?.startsWith("ppc")) return "PPC";
+  return null;
 };
 
 export const getSocketIO = () => io;

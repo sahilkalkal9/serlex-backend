@@ -5,6 +5,7 @@ import ManagerAdminAllocation from "../models/ManagerAdminAllocation.js";
 import UserAllocation from "../models/UserAllocation.js";
 import PurchaseOrder from "../models/PurchaseOrder.js";
 import { getDepartmentFilter } from "../utils/departmentFilter.js";
+import { getSocketIO } from "../socket.js";
 
 const getMonthKey = (date) => {
   const d = new Date(date);
@@ -238,6 +239,12 @@ export const allocateManagerToAdmin = async (req, res) => {
       }))
     );
 
+    const io = getSocketIO();
+    if (io) {
+      io.to("room:admin").emit("allocation:changed", { type: "manager_allocated", adminId, count: allocations.length });
+      io.to(`user:${adminId}`).emit("allocation:changed", { type: "manager_allocated", count: allocations.length });
+    }
+
     return res.status(201).json({
       success: true,
       message: `${allocations.length} manager(s) allocated`,
@@ -261,6 +268,12 @@ export const deallocateManager = async (req, res) => {
     allocation.deallocatedAt = new Date();
     allocation.deallocatedBy = req.user?.id || req.user?._id;
     await allocation.save();
+
+    const io = getSocketIO();
+    if (io) {
+      io.to("room:admin").emit("allocation:changed", { type: "manager_deallocated" });
+      io.to(`user:${allocation.admin}`).emit("allocation:changed", { type: "manager_deallocated" });
+    }
 
     return res.json({ success: true, message: "Manager deallocated" });
   } catch (error) {
@@ -291,6 +304,12 @@ export const setAdminTarget = async (req, res) => {
       },
       { upsert: true, new: true, runValidators: true }
     );
+
+    const io = getSocketIO();
+    if (io) {
+      io.to("room:admin").emit("target:updated", { type: "admin_target", adminId });
+      io.to(`user:${adminId}`).emit("target:updated", { type: "admin_target", period, periodKey, targetAmount });
+    }
 
     return res.json({ success: true, target });
   } catch (error) {

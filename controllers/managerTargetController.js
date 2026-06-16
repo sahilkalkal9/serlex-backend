@@ -2,6 +2,7 @@ import mongoose from "mongoose";
 import ManagerTarget from "../models/ManagerTarget.js";
 import User from "../models/User.js";
 import UserAllocation from "../models/UserAllocation.js";
+import { getSocketIO } from "../socket.js";
 
 const isAdmin = (user) => {
   return ["admin", "superadmin", "radmin"].includes(user?.role);
@@ -135,6 +136,14 @@ export const upsertManagerTarget = async (req, res) => {
         runValidators: true,
       }
     ).populate("manager", "name email employeeId designation department");
+
+    const io = getSocketIO();
+    if (io) {
+      const radminId = req.user?._id || req.user?.id;
+      io.to(`user:${managerId}`).emit("target:updated", { type: "manager_target", period, periodKey, targetAmount });
+      io.to("room:radmin").emit("target:updated", { type: "manager_target", managerId });
+      if (radminId) io.to(`user:${radminId}`).emit("target:updated", { type: "manager_target", managerId });
+    }
 
     return res.status(200).json({
       success: true,
