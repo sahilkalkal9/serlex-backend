@@ -50,7 +50,9 @@ const allowedOrigins = [
   "https://ppc.serlextechnologies.com",
   "http://admin.serlextechnologies.com",
   "http://sales.serlextechnologies.com",
-  "https://serlex-radmin-frontend.vercel.app"
+  "https://serlex-radmin-frontend.vercel.app",
+  "http://superadmin.serlextechnologies.com",
+  "https://superadmin.serlextechnologies.com"
   
   
 ];
