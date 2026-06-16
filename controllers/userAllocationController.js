@@ -3,6 +3,7 @@ import User from "../models/User.js";
 import UserAllocation from "../models/UserAllocation.js";
 import SalesTarget from "../models/SalesTarget.js";
 import ManagerTarget from "../models/ManagerTarget.js";
+import ManagerAdminAllocation from "../models/ManagerAdminAllocation.js";
 import { getDepartmentFilter } from "../utils/departmentFilter.js";
 
 const isAdmin = (user) => {
@@ -22,6 +23,14 @@ const getRoleConfig = (user) => {
     return { managerSubRole: "ppc_manager", userRole: "ppc_user" };
   }
   return { managerSubRole: "sales_manager", userRole: "sales_user" };
+};
+
+const getAllocatedManagerIds = async (radminId) => {
+  const allocations = await ManagerAdminAllocation.find({
+    admin: radminId,
+    isActive: true,
+  }).select("manager").lean();
+  return allocations.map((a) => String(a.manager));
 };
 
 // Allocate a user to a manager
@@ -77,6 +86,16 @@ export const allocateUserToManager = async (req, res) => {
         success: false,
         message: "Manager not found",
       });
+    }
+
+    if (req.user.role === "radmin") {
+      const allocatedIds = await getAllocatedManagerIds(req.user._id || req.user.id);
+      if (!allocatedIds.includes(String(manager._id))) {
+        return res.status(403).json({
+          success: false,
+          message: "You can only allocate users to managers assigned to you",
+        });
+      }
     }
 
     // Check if user is already allocated to an active manager
@@ -148,6 +167,16 @@ export const deallocateUserFromManager = async (req, res) => {
       });
     }
 
+    if (req.user.role === "radmin") {
+      const allocatedIds = await getAllocatedManagerIds(req.user._id || req.user.id);
+      if (!allocatedIds.includes(String(allocation.salesManager))) {
+        return res.status(403).json({
+          success: false,
+          message: "You can only deallocate users from managers assigned to you",
+        });
+      }
+    }
+
     // Update allocation to inactive
     allocation.isActive = false;
     allocation.deallocationDate = new Date();
@@ -191,6 +220,16 @@ export const getAllocationsForManager = async (req, res) => {
         success: false,
         message: "Manager ID is required",
       });
+    }
+
+    if (req.user.role === "radmin") {
+      const allocatedIds = await getAllocatedManagerIds(req.user._id || req.user.id);
+      if (!allocatedIds.includes(String(managerId))) {
+        return res.status(403).json({
+          success: false,
+          message: "You can only view allocations for managers assigned to you",
+        });
+      }
     }
 
     const query = {
@@ -333,6 +372,14 @@ export const getManagersWithAllocations = async (req, res) => {
     };
     if (department) {
       managerQuery.department = department;
+    }
+
+    if (req.user.role === "radmin") {
+      const allocatedIds = await getAllocatedManagerIds(req.user._id || req.user.id);
+      if (allocatedIds.length === 0) {
+        return res.status(200).json({ success: true, managers: [] });
+      }
+      managerQuery._id = { $in: allocatedIds };
     }
 
     const managers = await User.find(managerQuery)
@@ -531,6 +578,16 @@ export const bulkAllocateUsers = async (req, res) => {
         success: false,
         message: "Sales manager not found",
       });
+    }
+
+    if (req.user.role === "radmin") {
+      const allocatedIds = await getAllocatedManagerIds(req.user._id || req.user.id);
+      if (!allocatedIds.includes(String(salesManager._id))) {
+        return res.status(403).json({
+          success: false,
+          message: "You can only allocate users to managers assigned to you",
+        });
+      }
     }
 
     const deptFilter = getDepartmentFilter(req.user);
