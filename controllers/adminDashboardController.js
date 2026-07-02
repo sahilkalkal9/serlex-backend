@@ -245,7 +245,7 @@ export const createAdminUser = async (req, res) => {
       });
     }
 
-    const allowedRoles = ["admin", "radmin", "subadmin", "sales_user", "purchase_user", "ppc_user"];
+    const allowedRoles = ["admin", "superadmin", "radmin", "subadmin", "sales_user", "purchase_user", "ppc_user"];
     const allowedSubRoles = [
       "",
       "sales_admin",
