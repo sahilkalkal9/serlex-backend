@@ -1,9 +1,7 @@
-import { google } from "googleapis";
 import Meeting from "../models/Meeting.js";
 import Lead from "../models/Lead.js";
 import User from "../models/User.js";
 import MeetingReport from "../models/MeetingReport.js";
-import { getAuthorizedOAuthClient } from "../utils/googleClient.js";
 
 const normalizeAttendees = (attendees = []) => {
   if (!Array.isArray(attendees)) return [];
@@ -174,30 +172,6 @@ export const createMeeting = async (req, res) => {
 
     const attendeeEmails = normalizeAttendees(attendees);
 
-    const oauth2Client = await getAuthorizedOAuthClient(req.user.id);
-    const calendar = google.calendar({ version: "v3", auth: oauth2Client });
-
-    const eventPayload = {
-      summary: title,
-      description,
-      location: meetingType === "team" ? "" : location || "",
-      start: {
-        dateTime: new Date(startTime).toISOString(),
-        timeZone: "Asia/Kolkata",
-      },
-      end: {
-        dateTime: new Date(endTime).toISOString(),
-        timeZone: "Asia/Kolkata",
-      },
-      attendees: attendeeEmails.map((email) => ({ email })),
-    };
-
-    const googleResponse = await calendar.events.insert({
-      calendarId: "primary",
-      requestBody: eventPayload,
-      sendUpdates: "all",
-    });
-
     const meeting = await Meeting.create({
       title,
       personName:
@@ -215,9 +189,7 @@ export const createMeeting = async (req, res) => {
       attendeeResponses: buildAttendeeResponses(attendeeEmails),
       avatarUrl,
       createdBy: req.user.id,
-      googleEventId: googleResponse.data.id || "",
-      googleCalendarId: "primary",
-      source: "google",
+      source: "manual",
       status,
       approvalStatus: "pending",
       meetingType,
@@ -309,29 +281,6 @@ export const updateMeetingStatus = async (req, res) => {
       });
     }
 
-    if (status === "cancelled" && meeting.googleEventId) {
-      try {
-        const oauthUserId = meeting.createdBy?._id?.toString() || req.user.id;
-        const oauth2Client = await getAuthorizedOAuthClient(oauthUserId);
-        const calendar = google.calendar({ version: "v3", auth: oauth2Client });
-
-        await calendar.events.delete({
-          calendarId: meeting.googleCalendarId || "primary",
-          eventId: meeting.googleEventId,
-          sendUpdates: "all",
-        });
-      } catch (googleError) {
-        console.error("Google calendar cancellation error:", googleError);
-
-        return res.status(500).json({
-          success: false,
-          message:
-            googleError?.response?.data?.error?.message ||
-            "Meeting status not updated because Google Calendar cancellation failed",
-        });
-      }
-    }
-
     meeting.status = status;
 
     if (status === "cancelled") {
@@ -357,7 +306,7 @@ export const updateMeetingStatus = async (req, res) => {
       success: true,
       message:
         status === "cancelled"
-          ? "Meeting cancelled successfully and attendees notified"
+          ? "Meeting cancelled successfully"
           : "Meeting status updated successfully",
       meeting: updatedMeeting,
     });
@@ -591,30 +540,6 @@ export const createMeetingForSalesUser = async (req, res) => {
 
     const attendeeEmails = normalizeAttendees(attendees);
 
-    const oauth2Client = await getAuthorizedOAuthClient(salesUserId);
-    const calendar = google.calendar({ version: "v3", auth: oauth2Client });
-
-    const eventPayload = {
-      summary: title,
-      description,
-      location: meetingType === "team" ? "" : location || "",
-      start: {
-        dateTime: new Date(startTime).toISOString(),
-        timeZone: "Asia/Kolkata",
-      },
-      end: {
-        dateTime: new Date(endTime).toISOString(),
-        timeZone: "Asia/Kolkata",
-      },
-      attendees: attendeeEmails.map((email) => ({ email })),
-    };
-
-    const googleResponse = await calendar.events.insert({
-      calendarId: "primary",
-      requestBody: eventPayload,
-      sendUpdates: "all",
-    });
-
     const meeting = await Meeting.create({
       title,
       personName:
@@ -632,9 +557,7 @@ export const createMeetingForSalesUser = async (req, res) => {
       attendeeResponses: buildAttendeeResponses(attendeeEmails),
       avatarUrl,
       createdBy: salesUserId,
-      googleEventId: googleResponse.data.id || "",
-      googleCalendarId: "primary",
-      source: "google",
+      source: "manual",
       status,
       approvalStatus: "pending",
       meetingType,
