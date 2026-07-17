@@ -1,6 +1,7 @@
 import express from "express";
 import {
   clearUserDevice,
+  changeUserPassword,
   getAdminDashboard,
   getAdminMeetings,
   getAdminUsers,
@@ -44,6 +45,7 @@ router.patch("/users/:id/status", protect, authorizeAdminPanel, updateAdminUserS
 router.patch("/users/:id/approve", protect, authorizeAdminPanel, approveAdminUser);
 router.patch("/users/:id/working-hours", protect, authorizeAdminPanel, updateUserWorkingHours);
 router.patch("/users/:id/clear-device", protect, authorizeAdminPanel, clearUserDevice);
+router.patch("/users/:id/change-password", protect, authorizeAdminPanel, changeUserPassword);
 
 // Hierarchy tree
 router.get("/hierarchy", protect, authorizeAdminPanel, getAdminHierarchy);

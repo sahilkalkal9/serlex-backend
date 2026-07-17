@@ -78,6 +78,7 @@ export const getAdmins = async (req, res) => {
         isActive: true,
       }).select("salesManager salesUser").lean(),
       PurchaseOrder.find({
+        status: "Completed",
         poDate: {
           $gte: new Date(new Date().getFullYear(), new Date().getMonth(), 1),
           $lte: new Date(new Date().getFullYear(), new Date().getMonth() + 1, 0, 23, 59, 59, 999),

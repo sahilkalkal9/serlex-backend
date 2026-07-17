@@ -174,7 +174,7 @@ const buildSalesData = async (start, end, filters = {}, currentUser = null) => {
             .populate("salesUser", "name department managerName").lean()
         : Promise.resolve([]),
       allRelevantIds.length
-        ? PurchaseOrder.find({ ...dateQuery("poDate", start, end), createdBy: { $in: allRelevantIds } })
+        ? PurchaseOrder.find({ ...dateQuery("poDate", start, end), createdBy: { $in: allRelevantIds }, status: "Completed" })
             .populate("createdBy", "name department managerName").lean()
         : Promise.resolve([]),
       selectedManagerIds.length && latestPeriodKey
@@ -312,7 +312,7 @@ const buildSalesData = async (start, end, filters = {}, currentUser = null) => {
           .populate("salesUser", "name department managerName").lean()
       : Promise.resolve([]),
     allRelevantIds.length
-      ? PurchaseOrder.find({ ...dateQuery("poDate", start, end), createdBy: { $in: allRelevantIds } })
+      ? PurchaseOrder.find({ ...dateQuery("poDate", start, end), createdBy: { $in: allRelevantIds }, status: "Completed" })
           .populate("createdBy", "name department managerName").lean()
       : Promise.resolve([]),
     selectedManagerIds.length && latestPeriodKey

@@ -42,6 +42,11 @@ const purchaseOrderSchema = new mongoose.Schema(
       default: null,
     },
 
+    deliveryDateDeadline: {
+      type: Date,
+      default: null,
+    },
+
     status: {
       type: String,
       enum: ["Pending", "Approved", "In Progress", "Completed"],

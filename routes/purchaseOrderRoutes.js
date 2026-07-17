@@ -16,8 +16,11 @@ import {
   getPpcTrackingOrders,
   getPpcPlanningTrackingOrders,
   updatePpcPlanningApproval,
+  getAllPurchaseOrders,
+  resetDeliveryTimer,
+  setDeliveryDate,
 } from "../controllers/purchaseOrderController.js";
-import { protect } from "../middlewares/authMiddleware.js";
+import { protect, authorizeRoles } from "../middlewares/authMiddleware.js";
 
 const router = express.Router();
 
@@ -41,5 +44,9 @@ router.get("/sales-manager-tracking", protect, getSalesManagerPOTrackingOrders);
 router.get("/ppc-tracking", protect, getPpcTrackingOrders);
 router.get("/ppc-planning-tracking", protect, getPpcPlanningTrackingOrders);
 router.patch("/ppc-planning-tracking/:id", protect, updatePpcPlanningApproval);
+
+router.get("/all", protect, authorizeRoles("superadmin", "radmin", "admin"), getAllPurchaseOrders);
+router.patch("/reset-timer/:id", protect, authorizeRoles("superadmin"), resetDeliveryTimer);
+router.patch("/set-delivery-date/:id", protect, setDeliveryDate);
 
 export default router;

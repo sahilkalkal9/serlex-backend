@@ -314,6 +314,7 @@ export const getSalesTargetAchievementReport = async (req, res) => {
           createdBy: {
             $in: salesUserIds.map((id) => new mongoose.Types.ObjectId(id)),
           },
+          status: "Completed",
           poDate: {
             $gte: dateRange.startDate,
             $lte: dateRange.endDate,
@@ -534,6 +535,7 @@ export const getMySalesTargetReport = async (req, res) => {
       {
         $match: {
           createdBy: new mongoose.Types.ObjectId(salesUserId),
+          status: "Completed",
           poDate: {
             $gte: dateRange.startDate,
             $lte: dateRange.endDate,

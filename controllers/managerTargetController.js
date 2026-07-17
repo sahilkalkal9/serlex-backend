@@ -339,6 +339,7 @@ export const getMyManagerTarget = async (req, res) => {
         {
           $match: {
             createdBy: new mongoose.Types.ObjectId(managerId),
+            status: "Completed",
             poDate: { $gte: dateRange.startDate, $lte: dateRange.endDate },
           },
         },
@@ -352,6 +353,7 @@ export const getMyManagerTarget = async (req, res) => {
           {
             $match: {
               createdBy: { $in: allocatedUserIds.map((id) => new mongoose.Types.ObjectId(id)) },
+              status: "Completed",
               poDate: { $gte: dateRange.startDate, $lte: dateRange.endDate },
             },
           },

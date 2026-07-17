@@ -115,7 +115,10 @@ export const createPurchaseOrder = async (req, res) => {
       });
     }
 
-    const approvedValue = Boolean(isApproved || status === "Approved");
+    const poCategory = category?.trim() || "Trading";
+    const approvedValue = poCategory === "Trading"
+      ? true
+      : Boolean(isApproved || status === "Approved");
 
     const finalProcessingStatus = processingStatus || "Pending";
     const shouldSetProcessedBy = finalProcessingStatus === "Processed";
@@ -123,11 +126,14 @@ export const createPurchaseOrder = async (req, res) => {
     const purchaseOrder = await PurchaseOrder.create({
       poNo: poNo.trim(),
       companyName: companyName.trim(),
-      category: category?.trim() || "Trading",
+      category: poCategory,
       poValue: Number(poValue),
       poDate,
       expectedDeliveryDate: expectedDeliveryDate || null,
       deliveryDate: deliveryDate || null,
+      deliveryDateDeadline: poCategory === "Trading"
+        ? new Date(Date.now() + 4 * 24 * 60 * 60 * 1000)
+        : null,
 
       status: approvedValue ? "Approved" : status || "Pending",
 
@@ -784,6 +790,7 @@ export const getMyDailyActivityOrders = async (req, res) => {
           delayStatus: delayInfo.delayStatus,
           delayDays: delayInfo.delayDays,
           delayType: delayInfo.delayType,
+          deliveryDateDeadline: order.deliveryDateDeadline,
         };
       })
       .filter((order) => {
@@ -841,15 +848,13 @@ export const updateMyDailyActivityOrder = async (req, res) => {
     const allowedStatuses = [
       "Not Ordered",
       "Ordered",
+      "Material Dispatched by Supplier",
       "Material Received",
-      "Approved",
-      "Processed",
-      "In Transit",
-      "Invoiced",
+      "Material Dispatch",
+      "Material In Transit",
+      "Material Received at Customer End",
       "Delivered",
-      "Completed",
       "Payment Received",
-      "Delayed",
     ];
 
     if (!activityStatus) {
@@ -888,6 +893,22 @@ export const updateMyDailyActivityOrder = async (req, res) => {
       });
     }
 
+    if (!order.deliveryDate && order.deliveryDateDeadline && new Date() > new Date(order.deliveryDateDeadline)) {
+      return res.status(400).json({
+        success: false,
+        message: "Delivery date deadline has expired. Please contact admin to reset the timer.",
+      });
+    }
+
+    const hasDeliveryDate = Boolean(order.deliveryDate) || Boolean(deliveryDate);
+
+    if (!hasDeliveryDate && activityStatus !== "Not Ordered") {
+      return res.status(400).json({
+        success: false,
+        message: "Please add delivery date before updating status.",
+      });
+    }
+
     const oldStatus = order.activityStatus || "Not Ordered";
 
     const updateData = {
@@ -901,11 +922,6 @@ export const updateMyDailyActivityOrder = async (req, res) => {
       updateData.processingStatus = "Pending";
     }
 
-    if (activityStatus === "Approved") {
-      updateData.status = "Approved";
-      updateData.trackingStatus = "Approved";
-    }
-
     if (activityStatus === "Ordered") {
       updateData.status = "In Progress";
       updateData.trackingStatus = "Processed";
@@ -914,15 +930,7 @@ export const updateMyDailyActivityOrder = async (req, res) => {
       updateData.processedDate = new Date();
     }
 
-    if (activityStatus === "Processed") {
-      updateData.status = "In Progress";
-      updateData.trackingStatus = "Processed";
-      updateData.processingStatus = "Processed";
-      updateData.processedBy = getUserId(req);
-      updateData.processedDate = new Date();
-    }
-
-    if (activityStatus === "In Transit") {
+    if (activityStatus === "Material Dispatched by Supplier") {
       updateData.status = "In Progress";
       updateData.trackingStatus = "In Transit";
       updateData.processingStatus = "Processed";
@@ -935,6 +943,25 @@ export const updateMyDailyActivityOrder = async (req, res) => {
       updateData.deliveryDate = deliveryDate || new Date();
     }
 
+    if (activityStatus === "Material Dispatch") {
+      updateData.status = "In Progress";
+      updateData.trackingStatus = "In Transit";
+      updateData.processingStatus = "Processed";
+    }
+
+    if (activityStatus === "Material In Transit") {
+      updateData.status = "In Progress";
+      updateData.trackingStatus = "In Transit";
+      updateData.processingStatus = "Processed";
+    }
+
+    if (activityStatus === "Material Received at Customer End") {
+      updateData.status = "In Progress";
+      updateData.trackingStatus = "Delivered";
+      updateData.processingStatus = "Processed";
+      updateData.deliveryDate = deliveryDate || new Date();
+    }
+
     if (activityStatus === "Delivered") {
       updateData.status = "In Progress";
       updateData.trackingStatus = "Delivered";
@@ -942,16 +969,10 @@ export const updateMyDailyActivityOrder = async (req, res) => {
       updateData.deliveryDate = deliveryDate || new Date();
     }
 
-    if (activityStatus === "Completed") {
+    if (activityStatus === "Payment Received") {
       updateData.status = "Completed";
       updateData.trackingStatus = "Completed";
       updateData.processingStatus = "Processed";
-    }
-
-    if (activityStatus === "Delayed") {
-      updateData.status = "In Progress";
-      updateData.trackingStatus = "Delayed";
-      updateData.processingStatus = "Delayed";
     }
 
     if (deliveryDate !== undefined) {
@@ -1144,6 +1165,7 @@ export const getPOTrackingOrders = async (req, res) => {
         progress: getTrackingProgress(trackingStatus),
         expectedDeliveryDate: order.expectedDeliveryDate,
         deliveryDate: order.deliveryDate,
+        deliveryDateDeadline: order.deliveryDateDeadline,
         delayType: delayInfo.delayType,
         delayText: delayInfo.delayText,
         trackingRemarks: order.trackingRemarks || "",
@@ -2307,6 +2329,240 @@ export const getSalesManagerPOTrackingOrders = async (req, res) => {
     return res.status(500).json({
       success: false,
       message: "Failed to fetch sales manager PO tracking orders",
+      error: error.message,
+    });
+  }
+};
+
+export const getAllPurchaseOrders = async (req, res) => {
+  try {
+    const { fromDate, toDate, status, category, search } = req.query;
+
+    const filter = {};
+
+    if (fromDate || toDate) {
+      filter.poDate = {};
+      if (fromDate) {
+        const from = new Date(fromDate);
+        from.setHours(0, 0, 0, 0);
+        filter.poDate.$gte = from;
+      }
+      if (toDate) {
+        const to = new Date(toDate);
+        to.setHours(23, 59, 59, 999);
+        filter.poDate.$lte = to;
+      }
+    }
+
+    if (status && status !== "All") {
+      filter.trackingStatus = status;
+    }
+
+    if (category && category !== "All") {
+      filter.category = category;
+    }
+
+    if (search) {
+      filter.$or = [
+        { poNo: { $regex: search, $options: "i" } },
+        { companyName: { $regex: search, $options: "i" } },
+        { vendorName: { $regex: search, $options: "i" } },
+      ];
+    }
+
+    const orders = await PurchaseOrder.find(filter)
+      .populate("createdBy", "name email designation role subRole")
+      .populate("approvedBy", "name email designation role subRole")
+      .populate("processedBy", "name email designation role subRole")
+      .populate("statusLogs.updatedBy", "name email designation role subRole")
+      .sort({ _id: -1 });
+
+    const rows = orders.map((order) => {
+      const delayInfo = getDelayInfo(order);
+      const statusLogs = Array.isArray(order.statusLogs) ? order.statusLogs : [];
+      const latestLog = statusLogs.length > 0 ? statusLogs[statusLogs.length - 1] : null;
+
+      return {
+        _id: order._id,
+        poNo: order.poNo,
+        companyName: order.companyName,
+        vendorName: order.vendorName || "",
+        category: order.category,
+        poValue: order.poValue,
+        poDate: order.poDate,
+        expectedDeliveryDate: order.expectedDeliveryDate,
+        deliveryDate: order.deliveryDate,
+        deliveryDateDeadline: order.deliveryDateDeadline,
+        status: order.status,
+        isApproved: order.isApproved,
+        approvedBy: order.approvedBy,
+        approvedDate: order.approvedDate,
+        activityStatus: order.activityStatus || "Not Ordered",
+        trackingStatus: order.trackingStatus || "Not Approved",
+        processingStatus: order.processingStatus,
+        remarks: order.remarks || "",
+        latestRemark: latestLog?.remark || order.remarks || "",
+        statusLogs,
+        createdBy: order.createdBy,
+        delayStatus: delayInfo.delayStatus,
+        delayDays: delayInfo.delayDays,
+        delayType: delayInfo.delayType,
+        createdAt: order.createdAt,
+        updatedAt: order.updatedAt,
+      };
+    });
+
+    const totalPOValue = rows.reduce((sum, order) => sum + Number(order.poValue || 0), 0);
+
+    return res.status(200).json({
+      success: true,
+      cards: {
+        totalPOs: rows.length,
+        trading: rows.filter((item) => item.category === "Trading").length,
+        manufacturing: rows.filter((item) => item.category === "Manufacturing").length,
+        service: rows.filter((item) => item.category === "Service" || item.category === "Services").length,
+        approved: rows.filter((item) => item.isApproved).length,
+        notApproved: rows.filter((item) => !item.isApproved).length,
+        completed: rows.filter((item) => item.status === "Completed").length,
+        totalPOValue: formatMoney(totalPOValue),
+      },
+      rows,
+    });
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      message: "Failed to fetch all purchase orders",
+      error: error.message,
+    });
+  }
+};
+
+export const resetDeliveryTimer = async (req, res) => {
+  try {
+    const { resetDays } = req.body;
+    const days = Number(resetDays) || 4;
+
+    const order = await PurchaseOrder.findById(req.params.id);
+
+    if (!order) {
+      return res.status(404).json({
+        success: false,
+        message: "Purchase order not found",
+      });
+    }
+
+    const newDeadline = new Date(Date.now() + days * 24 * 60 * 60 * 1000);
+
+    const userName = req.user?.name || req.user?.username || req.user?.email || "Unknown User";
+    const userRole = req.user?.designation || req.user?.subRole || req.user?.role || "";
+
+    const updatedOrder = await PurchaseOrder.findByIdAndUpdate(
+      req.params.id,
+      {
+        $set: {
+          deliveryDateDeadline: newDeadline,
+        },
+        $push: {
+          statusLogs: {
+            oldStatus: "Timer Reset",
+            newStatus: "Timer Reset",
+            remark: `Delivery date timer reset by ${userName} for ${days} days`,
+            updatedBy: getUserId(req),
+            updatedByName: userName,
+            updatedByRole: userRole,
+            updatedAt: new Date(),
+          },
+        },
+      },
+      { new: true }
+    );
+
+    return res.status(200).json({
+      success: true,
+      message: `Delivery date timer reset for ${days} days`,
+      order: updatedOrder,
+    });
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      message: "Failed to reset delivery timer",
+      error: error.message,
+    });
+  }
+};
+
+export const setDeliveryDate = async (req, res) => {
+  try {
+    const { deliveryDate } = req.body;
+
+    if (!deliveryDate) {
+      return res.status(400).json({
+        success: false,
+        message: "Delivery date is required",
+      });
+    }
+
+    const order = await PurchaseOrder.findOne({
+      _id: req.params.id,
+      category: "Trading",
+      isApproved: true,
+    });
+
+    if (!order) {
+      return res.status(404).json({
+        success: false,
+        message: "Approved trading purchase order not found",
+      });
+    }
+
+    if (order.deliveryDate) {
+      return res.status(400).json({
+        success: false,
+        message: "Delivery date is already set for this PO",
+      });
+    }
+
+    if (order.deliveryDateDeadline && new Date() > new Date(order.deliveryDateDeadline)) {
+      return res.status(400).json({
+        success: false,
+        message: "Delivery date deadline has expired. Please contact admin to reset the timer.",
+      });
+    }
+
+    const userName = req.user?.name || req.user?.username || req.user?.email || "Unknown User";
+    const userRole = req.user?.designation || req.user?.subRole || req.user?.role || "";
+
+    const updatedOrder = await PurchaseOrder.findByIdAndUpdate(
+      req.params.id,
+      {
+        $set: {
+          deliveryDate: new Date(deliveryDate),
+          activityStatus: "Not Ordered",
+        },
+        $push: {
+          statusLogs: {
+            oldStatus: "Awaiting Delivery Date",
+            newStatus: "Delivery Date Set",
+            remark: `Delivery date set to ${new Date(deliveryDate).toLocaleDateString("en-IN")} by ${userName}`,
+            updatedBy: getUserId(req),
+            updatedByName: userName,
+            updatedByRole: userRole,
+            updatedAt: new Date(),
+          },
+        },
+      },
+      { new: true }
+    );
+
+    return res.status(200).json({
+      success: true,
+      message: "Delivery date set successfully",
+      order: updatedOrder,
+    });
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      message: "Failed to set delivery date",
       error: error.message,
     });
   }

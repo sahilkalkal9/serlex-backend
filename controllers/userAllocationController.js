@@ -467,6 +467,7 @@ export const getManagersWithAllocations = async (req, res) => {
             {
               $match: {
                 createdBy: new mongoose.Types.ObjectId(manager._id),
+                status: "Completed",
                 poDate: { $gte: dateRange.startDate, $lte: dateRange.endDate },
               },
             },
@@ -480,6 +481,7 @@ export const getManagersWithAllocations = async (req, res) => {
               {
                 $match: {
                   createdBy: { $in: allocatedUserIds.map((id) => new mongoose.Types.ObjectId(id)) },
+                  status: "Completed",
                   poDate: { $gte: dateRange.startDate, $lte: dateRange.endDate },
                 },
               },

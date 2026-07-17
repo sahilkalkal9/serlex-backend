@@ -664,6 +664,46 @@ export const updateUserWorkingHours = async (req, res) => {
   }
 };
 
+export const changeUserPassword = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { password } = req.body;
+
+    if (!password || String(password).trim().length < 4) {
+      return res.status(400).json({
+        success: false,
+        message: "Password must be at least 4 characters",
+      });
+    }
+
+    const user = await User.findById(id);
+    if (!user) {
+      return res.status(404).json({ success: false, message: "User not found" });
+    }
+
+    const department = getDepartmentFilter(req.user);
+    if (department && user.department !== department) {
+      return res.status(403).json({
+        success: false,
+        message: "You can only update users in your department",
+      });
+    }
+
+    const hashedPassword = await bcrypt.hash(String(password).trim(), 10);
+    user.password = hashedPassword;
+    user.pin = hashedPassword;
+    await user.save();
+
+    return res.json({
+      success: true,
+      message: "Password updated successfully",
+    });
+  } catch (error) {
+    console.error("changeUserPassword error:", error);
+    return res.status(500).json({ success: false, message: error.message || "Failed to change password" });
+  }
+};
+
 export const clearUserDevice = async (req, res) => {
   try {
     const { id } = req.params;
