@@ -19,6 +19,7 @@ import {
   getAllPurchaseOrders,
   resetDeliveryTimer,
   setDeliveryDate,
+  cancelPO,
 } from "../controllers/purchaseOrderController.js";
 import { protect, authorizeRoles } from "../middlewares/authMiddleware.js";
 
@@ -48,5 +49,6 @@ router.patch("/ppc-planning-tracking/:id", protect, updatePpcPlanningApproval);
 router.get("/all", protect, authorizeRoles("superadmin", "radmin", "admin"), getAllPurchaseOrders);
 router.patch("/reset-timer/:id", protect, authorizeRoles("superadmin"), resetDeliveryTimer);
 router.patch("/set-delivery-date/:id", protect, setDeliveryDate);
+router.patch("/cancel/:id", protect, cancelPO);
 
 export default router;

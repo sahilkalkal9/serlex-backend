@@ -2567,3 +2567,77 @@ export const setDeliveryDate = async (req, res) => {
     });
   }
 };
+
+export const cancelPO = async (req, res) => {
+  try {
+    const { cancelRemark } = req.body;
+
+    const order = await PurchaseOrder.findById(req.params.id);
+
+    if (!order) {
+      return res.status(404).json({
+        success: false,
+        message: "Purchase order not found",
+      });
+    }
+
+    if (order.status === "Cancelled") {
+      return res.status(400).json({
+        success: false,
+        message: "Purchase order is already cancelled",
+      });
+    }
+
+    if (order.status === "Completed") {
+      return res.status(400).json({
+        success: false,
+        message: "Cannot cancel a completed purchase order",
+      });
+    }
+
+    const userName = req.user?.name || req.user?.username || req.user?.email || "Unknown User";
+    const userRole = req.user?.designation || req.user?.subRole || req.user?.role || "";
+
+    const updatedOrder = await PurchaseOrder.findByIdAndUpdate(
+      req.params.id,
+      {
+        $set: {
+          status: "Cancelled",
+          activityStatus: "Cancelled",
+          trackingStatus: "Cancelled",
+          processingStatus: "Not Processed",
+        },
+        $push: {
+          statusLogs: {
+            oldStatus: order.status,
+            newStatus: "Cancelled",
+            remark: cancelRemark ? `PO Cancelled: ${cancelRemark}` : "PO Cancelled",
+            updatedBy: getUserId(req),
+            updatedByName: userName,
+            updatedByRole: userRole,
+            updatedAt: new Date(),
+          },
+        },
+      },
+      { new: true }
+    );
+
+    const io = getSocketIO();
+    if (io) {
+      io.to("room:admin").emit("po:updated", { type: "cancelled", poId: updatedOrder._id });
+      io.to("room:radmin").emit("po:updated", { type: "cancelled", poId: updatedOrder._id });
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: "Purchase order cancelled successfully",
+      order: updatedOrder,
+    });
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      message: "Failed to cancel purchase order",
+      error: error.message,
+    });
+  }
+};
