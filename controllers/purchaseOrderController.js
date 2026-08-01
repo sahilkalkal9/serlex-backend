@@ -1328,12 +1328,12 @@ export const getPpcPlanningTrackingOrders = async (req, res) => {
 
 export const updatePpcPlanningApproval = async (req, res) => {
   try {
-    const { isApproved, approvalRemarks, deliveryDate } = req.body;
+    const { deliveryDate, approvalRemarks } = req.body;
 
-    if (typeof isApproved !== "boolean") {
+    if (!deliveryDate) {
       return res.status(400).json({
         success: false,
-        message: "isApproved must be true or false",
+        message: "Delivery date is required to fix",
       });
     }
 
@@ -1349,42 +1349,23 @@ export const updatePpcPlanningApproval = async (req, res) => {
       });
     }
 
-    if (isApproved && order.isApproved && order.deliveryDate) {
+    if (order.deliveryDate) {
       return res.status(400).json({
         success: false,
-        message: "Delivery date already fixed and approved. Cannot modify.",
-      });
-    }
-
-    if (isApproved && !deliveryDate) {
-      return res.status(400).json({
-        success: false,
-        message: "Delivery date is required to approve",
+        message: "Delivery date already fixed. Cannot modify.",
       });
     }
 
     const updateData = {
-      isApproved,
-      approvalRemarks: approvalRemarks || "",
-      status: isApproved ? "Approved" : "Pending",
-      trackingStatus: isApproved ? "Approved" : "Not Approved",
-      approvedBy: isApproved ? getUserId(req) : null,
-      approvedDate: isApproved ? new Date() : null,
+      isApproved: true,
+      approvalRemarks: approvalRemarks || "Pre-approved",
+      status: "Approved",
+      trackingStatus: "Approved",
+      activityStatus: "Ordered",
+      approvedBy: getUserId(req),
+      approvedDate: order.approvedDate || new Date(),
+      deliveryDate: new Date(deliveryDate),
     };
-
-    if (isApproved && deliveryDate) {
-      updateData.deliveryDate = new Date(deliveryDate);
-      updateData.activityStatus = "Ordered";
-    }
-
-    if (!isApproved) {
-      updateData.processingStatus = "Pending";
-      updateData.processedBy = null;
-      updateData.processedDate = null;
-      updateData.processingRemarks = "";
-      updateData.activityStatus = "Not Ordered";
-      updateData.deliveryDate = null;
-    }
 
     const updatedOrder = await PurchaseOrder.findByIdAndUpdate(
       req.params.id,
@@ -1396,15 +1377,13 @@ export const updatePpcPlanningApproval = async (req, res) => {
 
     return res.status(200).json({
       success: true,
-      message: isApproved
-        ? "Purchase order approved successfully with delivery date"
-        : "Purchase order marked as not approved",
+      message: "Delivery date fixed successfully",
       order: updatedOrder,
     });
   } catch (error) {
     return res.status(500).json({
       success: false,
-      message: "Failed to update PPC planning approval",
+      message: "Failed to fix delivery date",
       error: error.message,
     });
   }
