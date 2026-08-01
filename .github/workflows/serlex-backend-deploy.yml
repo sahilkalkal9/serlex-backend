@@ -26,13 +26,13 @@ jobs:
 
       - name: Create backend tar
         run: |
-          tar \
-            --exclude='.git' \
-            --exclude='node_modules' \
-            --exclude='*.log' \
-            --exclude='.env' \
-            --exclude='.github' \
-            -czf serlex-backend.tar.gz .
+          rm -f serlex-backend.tar.gz
+
+          # Archive only tracked Git files
+          git archive \
+            --format=tar.gz \
+            --output=serlex-backend.tar.gz \
+            HEAD
 
       - name: Upload tar to server
         uses: appleboy/scp-action@v0.1.7
@@ -56,6 +56,7 @@ jobs:
 
             APP_DIR="/var/www/a0973e2f-1de5-4fa0-b314-d5045219fdc2"
             BACKUP_DIR="/root/serlex-backend-safe"
+            TEMP_DIR="/tmp/serlex-backend-release"
 
             echo "Loading Node/NPM..."
 
@@ -66,7 +67,7 @@ jobs:
             fi
 
             if ! command -v node >/dev/null 2>&1 || ! command -v npm >/dev/null 2>&1; then
-              echo "Node/NPM not found. Running Enhance Node installer..."
+              echo "Node/NPM not found. Installing..."
               /usr/bin/install_nvm_and_node.sh || true
 
               export NVM_DIR="$HOME/.nvm"
@@ -87,33 +88,46 @@ jobs:
             echo "NPM version:"
             npm -v
 
-            echo "Going to backend app directory..."
+            mkdir -p "$BACKUP_DIR"
+
             cd "$APP_DIR"
 
-            echo "Saving .env..."
-            mkdir -p "$BACKUP_DIR"
+            echo "Backing up .env..."
             if [ -f ".env" ]; then
               cp .env "$BACKUP_DIR/.env"
             fi
 
-            echo "Stopping old backend process on port 5000..."
+            echo "Stopping existing backend..."
             if command -v fuser >/dev/null 2>&1; then
               fuser -k 5000/tcp || true
             else
-              OLD_PID=$(ss -ltnp 2>/dev/null | grep ':5000' | sed -n 's/.*pid=\([0-9]*\).*/\1/p' | head -1)
-              if [ -n "$OLD_PID" ]; then
-                kill "$OLD_PID" || true
-              fi
+              PID=$(ss -ltnp 2>/dev/null | grep ':5000' | sed -n 's/.*pid=\([0-9]*\).*/\1/p' | head -1)
+              [ -n "$PID" ] && kill "$PID" || true
             fi
 
             sleep 2
 
-            echo "Cleaning old backend files except .env..."
+            echo "Preparing release directory..."
+            rm -rf "$TEMP_DIR"
+            mkdir -p "$TEMP_DIR"
+
+            cp /root/serlex-backend.tar.gz "$TEMP_DIR/"
+            cd "$TEMP_DIR"
+
+            echo "Extracting release..."
+            tar -xzf serlex-backend.tar.gz
+
+            if [ ! -f "server.js" ]; then
+              echo "ERROR: server.js not found after extraction."
+              exit 1
+            fi
+
+            echo "Deploying files..."
+            cd "$APP_DIR"
+
             find . -mindepth 1 -maxdepth 1 ! -name ".env" -exec rm -rf {} +
 
-            echo "Extracting latest backend..."
-            cp /root/serlex-backend.tar.gz .
-            tar -xzf serlex-backend.tar.gz
+            cp -a "$TEMP_DIR"/. .
 
             echo "Restoring .env..."
             if [ -f "$BACKUP_DIR/.env" ]; then
@@ -121,24 +135,24 @@ jobs:
             fi
 
             echo "Installing dependencies..."
-            npm install
+            npm install --production
 
-            echo "Checking server.js syntax..."
+            echo "Checking server syntax..."
             node --check server.js
 
-            echo "Starting backend in background..."
+            echo "Starting backend..."
             nohup npm start > backend-live.log 2>&1 &
 
             sleep 5
 
-            echo "Checking backend port..."
+            echo "Checking listening port..."
             ss -ltnp | grep ':5000' || true
 
-            echo "Testing backend locally..."
+            echo "Testing backend..."
             curl -I http://localhost:5000 || true
 
-            echo "Cleaning tar files..."
+            echo "Cleaning temporary files..."
+            rm -rf "$TEMP_DIR"
             rm -f /root/serlex-backend.tar.gz
-            rm -f serlex-backend.tar.gz
 
-            echo "Backend deployment completed."
+            echo "✅ Backend deployment completed successfully."
