@@ -1,0 +1,5 @@
+◇ injected env (8) from .env // tip: ⌘ enable debugging { debug: true }
+✅ MongoDB connected successfully
+✅ Socket.IO initialized
+🚀 Server running on port 5000
+🔌 User connected: PUTEST (purchase_user/) [NgIw72mBKgcJHXHwAAAB]

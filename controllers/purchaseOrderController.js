@@ -924,7 +924,7 @@ export const updateMyDailyActivityOrder = async (req, res) => {
 
     if (activityStatus === "Ordered") {
       updateData.status = "In Progress";
-      updateData.trackingStatus = "Processed";
+      updateData.trackingStatus = "In Progress";
       updateData.processingStatus = "Processed";
       updateData.processedBy = getUserId(req);
       updateData.processedDate = new Date();

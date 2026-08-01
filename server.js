@@ -1,6 +1,7 @@
 import express from "express";
 import mongoose from "mongoose";
 import dotenv from "dotenv";
+import dns from "node:dns";
 import cors from "cors";
 import cron from "node-cron";
 import axios from "axios";
@@ -26,6 +27,8 @@ import managerTargetRoutes from "./routes/managerTargetRoutes.js";
 
 
 dotenv.config();
+
+dns.setServers(["8.8.8.8", "1.1.1.1"]);
 
 const app = express();
 const httpServer = createServer(app);
