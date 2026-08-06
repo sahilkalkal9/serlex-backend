@@ -70,6 +70,7 @@ export const createMeetingReport = async (req, res) => {
       leadId,
       purchaseOrderNumber,
       companyName,
+      itemName,
       contactPerson,
       phoneNumber,
       meetingDateTime,
@@ -117,6 +118,12 @@ export const createMeetingReport = async (req, res) => {
           message: "Company name is required",
         });
       }
+      if (!itemName?.trim()) {
+        return res.status(400).json({
+          success: false,
+          message: "Item name is required",
+        });
+      }
       if (!contactPerson?.trim()) {
         return res.status(400).json({
           success: false,
@@ -152,6 +159,7 @@ export const createMeetingReport = async (req, res) => {
     } else {
       reportPayload.leadId = leadId || "";
       reportPayload.companyName = companyName.trim();
+      reportPayload.itemName = itemName.trim();
       reportPayload.contactPerson = contactPerson.trim();
       reportPayload.phoneNumber = phoneNumber.trim();
       reportPayload.meetingDateTime = meetingDateTime;
@@ -478,6 +486,7 @@ export const updateMeetingReport = async (req, res) => {
     } else {
       const {
         companyName,
+        itemName,
         contactPerson,
         phoneNumber,
         purchaseOrderNumber,
@@ -495,6 +504,13 @@ export const updateMeetingReport = async (req, res) => {
         return res.status(400).json({
           success: false,
           message: "Company name is required",
+        });
+      }
+
+      if (!itemName?.trim()) {
+        return res.status(400).json({
+          success: false,
+          message: "Item name is required",
         });
       }
 
@@ -520,6 +536,7 @@ export const updateMeetingReport = async (req, res) => {
       }
 
       report.companyName = companyName.trim();
+      report.itemName = itemName.trim();
       report.contactPerson = contactPerson.trim();
       report.phoneNumber = phoneNumber.trim();
       report.purchaseOrderNumber = purchaseOrderNumber || "";

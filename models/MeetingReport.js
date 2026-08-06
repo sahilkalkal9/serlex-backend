@@ -21,6 +21,13 @@ const meetingReportSchema = new mongoose.Schema(
       },
       trim: true,
     },
+    itemName: {
+      type: String,
+      required: function () {
+        return this.reportType === "client";
+      },
+      trim: true,
+    },
     contactPerson: {
       type: String,
       required: function () {
