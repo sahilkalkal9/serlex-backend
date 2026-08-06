@@ -277,13 +277,6 @@ export const updateApprovedPOProcessing = async (req, res) => {
       });
     }
 
-    if (!order.isApproved) {
-      return res.status(400).json({
-        success: false,
-        message: "Only approved purchase orders can be processed",
-      });
-    }
-
     const updateData = {};
 
     if (processingStatus) {
@@ -707,6 +700,51 @@ export const getApprovedPurchaseOrders = async (req, res) => {
       success: false,
       message: "Failed to fetch manufacturing/service purchase orders",
       error: error.message,
+    });
+  }
+};
+
+export const getMySalesUserPOs = async (req, res) => {
+  try {
+    const { search = "", status = "all", activityStatus = "all" } = req.query;
+
+    const filter = {
+      createdBy: getUserId(req),
+    };
+
+    if (status && status !== "all") {
+      filter.status = status;
+    }
+
+    if (activityStatus && activityStatus !== "all") {
+      filter.activityStatus = activityStatus;
+    }
+
+    if (search) {
+      filter.$or = [
+        { poNo: { $regex: search, $options: "i" } },
+        { companyName: { $regex: search, $options: "i" } },
+        { vendorName: { $regex: search, $options: "i" } },
+      ];
+    }
+
+    const orders = await PurchaseOrder.find(filter)
+      .select(
+        "poNo companyName category poValue poDate status activityStatus trackingStatus expectedDeliveryDate deliveryDate"
+      )
+      .sort({ poDate: -1, _id: -1 });
+
+    return res.status(200).json({
+      success: true,
+      count: orders.length,
+      orders,
+    });
+  } catch (error) {
+    console.error("getMySalesUserPOs error:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: error.message || "Failed to fetch your purchase orders",
     });
   }
 };
@@ -1525,13 +1563,6 @@ export const updatePOTrackingOrder = async (req, res) => {
       });
     }
 
-    if (!existingOrder.isApproved && trackingStatus !== "Not Approved") {
-      return res.status(400).json({
-        success: false,
-        message: "Only approved purchase orders can have tracking updated",
-      });
-    }
-
     const updateData = {};
 
     if (trackingStatus) {
@@ -1946,6 +1977,9 @@ export const updatePOActionStatus = async (req, res) => {
       delivered: "Delivered",
       completed: "Completed",
       payment_received: "Completed & Payment Received",
+      ready_to_dispatch: "Ready to Dispatch",
+      dispatched: "Dispatched",
+      handover: "Handover",
     };
 
     if (action === "approve") {
@@ -1987,14 +2021,11 @@ export const updatePOActionStatus = async (req, res) => {
       updateData.remarks = cleanRemarks;
     }
 
-    if (action === "not_started" || action === "not_processed") {
-      if (!order.isApproved) {
-        return res.status(400).json({
-          success: false,
-          message: "Only approved purchase orders can be updated",
-        });
-      }
+    if (action !== "approve" && action !== "reject") {
+      updateData.isApproved = true;
+    }
 
+    if (action === "not_started" || action === "not_processed") {
       updateData.activityStatus = "Not Ordered";
       updateData.trackingStatus = "Approved";
       updateData.processingStatus =
@@ -2008,13 +2039,6 @@ export const updatePOActionStatus = async (req, res) => {
     }
 
     if (action === "in_progress" || action === "processed") {
-      if (!order.isApproved) {
-        return res.status(400).json({
-          success: false,
-          message: "Only approved purchase orders can be processed",
-        });
-      }
-
       updateData.activityStatus = "Processed";
       updateData.trackingStatus = "Processed";
       updateData.processingStatus = "Processed";
@@ -2027,13 +2051,6 @@ export const updatePOActionStatus = async (req, res) => {
     }
 
     if (action === "delay" || action === "delayed") {
-      if (!order.isApproved) {
-        return res.status(400).json({
-          success: false,
-          message: "Only approved purchase orders can be delayed",
-        });
-      }
-
       updateData.activityStatus = "Delayed";
       updateData.trackingStatus = "Delayed";
       updateData.processingStatus = "Delayed";
@@ -2046,13 +2063,6 @@ export const updatePOActionStatus = async (req, res) => {
     }
 
     if (action === "invoiced") {
-      if (!order.isApproved) {
-        return res.status(400).json({
-          success: false,
-          message: "Only approved purchase orders can be invoiced",
-        });
-      }
-
       updateData.activityStatus = "Invoiced";
       updateData.trackingStatus = "Invoiced";
       updateData.processingStatus = "Processed";
@@ -2065,13 +2075,6 @@ export const updatePOActionStatus = async (req, res) => {
     }
 
     if (action === "delivered") {
-      if (!order.isApproved) {
-        return res.status(400).json({
-          success: false,
-          message: "Only approved purchase orders can be delivered",
-        });
-      }
-
       updateData.deliveryDate = new Date();
       updateData.activityStatus = "Delivered";
       updateData.trackingStatus = "Delivered";
@@ -2085,13 +2088,6 @@ export const updatePOActionStatus = async (req, res) => {
     }
 
     if (action === "completed") {
-      if (!order.isApproved) {
-        return res.status(400).json({
-          success: false,
-          message: "Only approved purchase orders can be completed",
-        });
-      }
-
       updateData.status = "Completed";
       updateData.trackingStatus = "Completed";
       updateData.activityStatus = "Completed";
@@ -2104,18 +2100,48 @@ export const updatePOActionStatus = async (req, res) => {
     }
 
     if (action === "payment_received") {
-      if (!order.isApproved) {
-        return res.status(400).json({
-          success: false,
-          message: "Only approved purchase orders can receive payment",
-        });
-      }
-
-      updateData.status = "In Progress";
+      updateData.status = "Completed";
       updateData.trackingStatus = "Payment Received";
       updateData.activityStatus = "Payment Received";
       updateData.processingStatus = "Processed";
       updateData.paymentReceivedDate = new Date();
+      updateData.processedBy = getUserId(req);
+      updateData.processedDate = new Date();
+      updateData.processingRemarks = cleanRemarks;
+      updateData.trackingRemarks = cleanRemarks;
+      updateData.remarks = cleanRemarks;
+    }
+
+    if (action === "ready_to_dispatch") {
+      updateData.activityStatus = "Material Dispatch";
+      updateData.trackingStatus = "Processed";
+      updateData.processingStatus = "Processed";
+      updateData.status = "In Progress";
+      updateData.processedBy = getUserId(req);
+      updateData.processedDate = new Date();
+      updateData.processingRemarks = cleanRemarks;
+      updateData.trackingRemarks = cleanRemarks;
+      updateData.remarks = cleanRemarks;
+    }
+
+    if (action === "dispatched") {
+      updateData.activityStatus = "Material Dispatched by Supplier";
+      updateData.trackingStatus = "In Transit";
+      updateData.processingStatus = "Processed";
+      updateData.status = "In Progress";
+      updateData.processedBy = getUserId(req);
+      updateData.processedDate = new Date();
+      updateData.processingRemarks = cleanRemarks;
+      updateData.trackingRemarks = cleanRemarks;
+      updateData.remarks = cleanRemarks;
+    }
+
+    if (action === "handover") {
+      updateData.activityStatus = "Material Received at Customer End";
+      updateData.trackingStatus = "Delivered";
+      updateData.processingStatus = "Processed";
+      updateData.status = "In Progress";
+      updateData.deliveryDate = new Date();
       updateData.processedBy = getUserId(req);
       updateData.processedDate = new Date();
       updateData.processingRemarks = cleanRemarks;

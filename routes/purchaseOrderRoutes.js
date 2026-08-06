@@ -17,6 +17,7 @@ import {
   getPpcPlanningTrackingOrders,
   updatePpcPlanningApproval,
   getAllPurchaseOrders,
+  getMySalesUserPOs,
   resetDeliveryTimer,
   setDeliveryDate,
   cancelPO,
@@ -34,6 +35,8 @@ router.get("/approved", protect, getApprovedPurchaseOrders);
 
 router.get("/daily-activity", protect, getMyDailyActivityOrders);
 router.patch("/daily-activity/:id", protect, updateMyDailyActivityOrder);
+
+router.get("/my-pos", protect, getMySalesUserPOs);
 
 router.get("/tracking", protect, getPOTrackingOrders);
 router.patch("/tracking/:id", protect, updatePOTrackingOrder);
