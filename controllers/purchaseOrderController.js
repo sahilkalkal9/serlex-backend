@@ -706,7 +706,12 @@ export const getApprovedPurchaseOrders = async (req, res) => {
 
 export const getMySalesUserPOs = async (req, res) => {
   try {
-    const { search = "", status = "all", activityStatus = "all" } = req.query;
+    const {
+      search = "",
+      status = "all",
+      activityStatus = "all",
+      month = "",
+    } = req.query;
 
     const filter = {
       createdBy: getUserId(req),
@@ -718,6 +723,17 @@ export const getMySalesUserPOs = async (req, res) => {
 
     if (activityStatus && activityStatus !== "all") {
       filter.activityStatus = activityStatus;
+    }
+
+    if (month && month !== "all") {
+      const [year, monthNum] = month.split("-").map(Number);
+
+      if (year && monthNum >= 1 && monthNum <= 12) {
+        filter.poDate = {
+          $gte: new Date(year, monthNum - 1, 1),
+          $lte: new Date(year, monthNum, 0, 23, 59, 59, 999),
+        };
+      }
     }
 
     if (search) {
