@@ -1,4 +1,5 @@
 import PurchaseOrder from "../models/PurchaseOrder.js";
+import MeetingReport from "../models/MeetingReport.js";
 import { getSocketIO } from "../socket.js";
 
 const formatMoney = (amount = 0) => {
@@ -9,6 +10,25 @@ const formatMoney = (amount = 0) => {
 
 const getUserId = (req) => {
   return req.user?._id || req.user?.id || null;
+};
+
+const buildItemNameMap = async (orders) => {
+  const map = new Map();
+  const ids = orders.map((o) => o._id);
+
+  if (!ids.length) return map;
+
+  const reports = await MeetingReport.find({
+    purchaseOrder: { $in: ids },
+  }).select("purchaseOrder itemName");
+
+  reports.forEach((report) => {
+    if (report.itemName) {
+      map.set(String(report.purchaseOrder), report.itemName);
+    }
+  });
+
+  return map;
 };
 
 const getDateRangeFilter = (fromDate, toDate, field = "poDate") => {
@@ -614,6 +634,8 @@ export const getApprovedPurchaseOrders = async (req, res) => {
       .populate("statusLogs.updatedBy", "name email designation role subRole")
       .sort({ _id: -1 });
 
+    const itemNameMap = await buildItemNameMap(orders);
+
     const totalValue = orders.reduce(
       (sum, order) => sum + Number(order.poValue || 0),
       0
@@ -658,6 +680,8 @@ export const getApprovedPurchaseOrders = async (req, res) => {
         return {
           _id: order._id,
           poNo: order.poNo,
+
+          itemName: itemNameMap.get(String(order._id)) || "",
 
           vendorCompany: order.vendorName || order.companyName,
           vendorName: order.vendorName || "",
@@ -811,6 +835,8 @@ export const getMyDailyActivityOrders = async (req, res) => {
       .populate("statusLogs.updatedBy", "name email designation role subRole")
       .sort({ _id: -1 });
 
+    const itemNameMap = await buildItemNameMap(orders);
+
     const rows = orders
       .map((order) => {
         const delayInfo = getDelayInfo(order);
@@ -824,6 +850,7 @@ export const getMyDailyActivityOrders = async (req, res) => {
         return {
           _id: order._id,
           poNo: order.poNo,
+          itemName: itemNameMap.get(String(order._id)) || "",
           companyName: order.companyName,
           vendorName: order.vendorName || "",
           category: order.category,
@@ -1202,6 +1229,8 @@ export const getPOTrackingOrders = async (req, res) => {
 
     const orders = await PurchaseOrder.find(filter).sort({ _id: -1 });
 
+    const itemNameMap = await buildItemNameMap(orders);
+
     const rows = orders.map((order) => {
       const delayInfo = getTrackingDelayInfo(order);
       const trackingStatus = order.trackingStatus || "Not Approved";
@@ -1209,6 +1238,7 @@ export const getPOTrackingOrders = async (req, res) => {
       return {
         _id: order._id,
         poNo: order.poNo,
+        itemName: itemNameMap.get(String(order._id)) || "",
         category: order.category,
         vendorCompany: order.vendorName || order.companyName,
         companyName: order.companyName,
@@ -1323,6 +1353,8 @@ export const getPpcPlanningTrackingOrders = async (req, res) => {
       .populate("createdBy", "name email designation role subRole")
       .sort({ _id: -1 });
 
+    const itemNameMap = await buildItemNameMap(orders);
+
     const totalPOs = orders.length;
     const approvedPOs = orders.filter((o) => o.isApproved).length;
     const notApprovedPOs = orders.filter((o) => !o.isApproved).length;
@@ -1341,6 +1373,7 @@ export const getPpcPlanningTrackingOrders = async (req, res) => {
       rows: orders.map((order) => ({
         _id: order._id,
         poNo: order.poNo,
+        itemName: itemNameMap.get(String(order._id)) || "",
         companyName: order.companyName,
         vendorCompany: order.vendorName || order.companyName,
         vendorName: order.vendorName || "",
@@ -1500,6 +1533,8 @@ export const getPpcTrackingOrders = async (req, res) => {
 
     const orders = await PurchaseOrder.find(filter).sort({ _id: -1 });
 
+    const itemNameMap = await buildItemNameMap(orders);
+
     const rows = orders.map((order) => {
       const delayInfo = getTrackingDelayInfo(order);
       const trackingStatus = order.trackingStatus || "Not Approved";
@@ -1507,6 +1542,7 @@ export const getPpcTrackingOrders = async (req, res) => {
       return {
         _id: order._id,
         poNo: order.poNo,
+        itemName: itemNameMap.get(String(order._id)) || "",
         category: order.category,
         vendorCompany: order.vendorName || order.companyName,
         companyName: order.companyName,
@@ -1711,6 +1747,8 @@ export const getPurchasePlanningTrackingOrders = async (req, res) => {
       .populate("statusLogs.updatedBy", "name email designation role subRole")
       .sort({ _id: -1 });
 
+    const itemNameMap = await buildItemNameMap(orders);
+
     const totalTradingPOs = orders.length;
     const approvedPOs = orders.filter((order) => order.isApproved).length;
     const notApprovedPOs = orders.filter((order) => !order.isApproved).length;
@@ -1744,6 +1782,7 @@ export const getPurchasePlanningTrackingOrders = async (req, res) => {
           _id: order._id,
 
           poNo: order.poNo,
+          itemName: itemNameMap.get(String(order._id)) || "",
           companyName: order.companyName,
           vendorCompany: order.vendorName || order.companyName,
           vendorName: order.vendorName || "",
@@ -1818,13 +1857,6 @@ export const updatePurchasePlanningApproval = async (req, res) => {
       return res.status(404).json({
         success: false,
         message: "Trading purchase order not found",
-      });
-    }
-
-    if (isApproved && order.isApproved && order.deliveryDate) {
-      return res.status(400).json({
-        success: false,
-        message: "Delivery date already fixed and approved. Cannot modify.",
       });
     }
 
@@ -2272,6 +2304,8 @@ export const getSalesManagerPOTrackingOrders = async (req, res) => {
       .populate("statusLogs.updatedBy", "name email designation role subRole")
       .sort({ _id: -1 });
 
+    const itemNameMap = await buildItemNameMap(orders);
+
     const rows = orders.map((order) => {
       const statusLogs = Array.isArray(order.statusLogs)
         ? order.statusLogs
@@ -2284,6 +2318,7 @@ export const getSalesManagerPOTrackingOrders = async (req, res) => {
         _id: order._id,
 
         poNo: order.poNo,
+        itemName: itemNameMap.get(String(order._id)) || "",
         companyName: order.companyName,
         vendorCompany: order.vendorName || order.companyName,
         vendorName: order.vendorName || "",
@@ -2398,6 +2433,8 @@ export const getAllPurchaseOrders = async (req, res) => {
       .populate("statusLogs.updatedBy", "name email designation role subRole")
       .sort({ _id: -1 });
 
+    const itemNameMap = await buildItemNameMap(orders);
+
     const rows = orders.map((order) => {
       const delayInfo = getDelayInfo(order);
       const statusLogs = Array.isArray(order.statusLogs) ? order.statusLogs : [];
@@ -2406,6 +2443,7 @@ export const getAllPurchaseOrders = async (req, res) => {
       return {
         _id: order._id,
         poNo: order.poNo,
+        itemName: itemNameMap.get(String(order._id)) || "",
         companyName: order.companyName,
         vendorName: order.vendorName || "",
         category: order.category,
