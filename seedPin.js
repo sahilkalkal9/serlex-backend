@@ -9,6 +9,8 @@ const EMPLOYEE_ID = "ST62";
 const NEW_PIN = "0210";
 const SALT_ROUNDS = 10;
 
+
+
 async function seedPin() {
   try {
     await mongoose.connect(process.env.MONGO_URI);
